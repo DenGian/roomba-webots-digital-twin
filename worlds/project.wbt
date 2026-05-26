@@ -1,0 +1,478 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/tables/protos/Table.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/chairs/protos/Chair.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Parquetry.proto"
+
+WorldInfo {
+}
+Viewpoint {
+  orientation -0.049778414002320484 -0.9947239143002271 0.08970197221158575 5.159943655422003
+  position -4.409215636659378 -0.04241512808853898 9.28921577363841
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+  floorSize 6 6
+  floorAppearance Parquetry {
+    type "light strip"
+  }
+}
+Solid {
+  translation 0 2.95 0.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.9 0.9 0.9
+      }
+      geometry Box {
+        size 6 0.1 1
+      }
+    }
+  ]
+  name "wall_north"
+  boundingObject Box {
+    size 6 0.1 1
+  }
+}
+Solid {
+  translation 0 -2.95 0.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.9 0.9 0.9
+      }
+      geometry Box {
+        size 6 0.1 1
+      }
+    }
+  ]
+  name "wall_south"
+  boundingObject Box {
+    size 6 0.1 1
+  }
+}
+Solid {
+  translation 2.95 0 0.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.9 0.9 0.9
+      }
+      geometry Box {
+        size 0.1 6 1
+      }
+    }
+  ]
+  name "wall_east"
+  boundingObject Box {
+    size 0.1 6 1
+  }
+}
+Solid {
+  translation -2.95 0 0.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.9 0.9 0.9
+      }
+      geometry Box {
+        size 0.1 6 1
+      }
+    }
+  ]
+  name "wall_west"
+  boundingObject Box {
+    size 0.1 6 1
+  }
+}
+Charger {
+  translation 2 2.85 0.075
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.05 0.05 0.05
+        roughness 0.5
+      }
+      geometry Box {
+        size 0.25 0.15 0.15
+      }
+    }
+  ]
+  name "home_base"
+  boundingObject Box {
+    size 0.25 0.15 0.15
+  }
+  radius 0.4
+}
+Robot {
+  translation -2.45 -2.43 0.075
+  children [
+    HingeJoint {
+      jointParameters HingeJointParameters {
+        position 68.83238440091796
+        axis 0 1 0
+        anchor 0 0.115 -0.04
+      }
+      device [
+        RotationalMotor {
+          name "motor_left"
+        }
+      ]
+      endPoint Solid {
+        translation 0 0.115 -0.04
+        rotation 0 1 0 6.0005313291220945
+        children [
+          DEF WHEEL_SHAPE Pose {
+            rotation 1 0 0 1.570799
+            children [
+              Shape {
+                appearance PBRAppearance {
+                  baseColor 0.2 0.2 0.2
+                  roughness 1
+                }
+                geometry Cylinder {
+                  height 0.02
+                  radius 0.035
+                }
+              }
+            ]
+          }
+        ]
+        name "left_wheel"
+        boundingObject USE WHEEL_SHAPE
+        physics Physics {
+        }
+      }
+    }
+    HingeJoint {
+      jointParameters HingeJointParameters {
+        position 68.88941400754325
+        axis 0 1 0
+        anchor 0 -0.115 -0.04
+      }
+      device [
+        RotationalMotor {
+          name "motor_right"
+        }
+      ]
+      endPoint Solid {
+        translation 0 -0.115 -0.04
+        rotation 0 1 0 6.057560935747387
+        children [
+          USE WHEEL_SHAPE
+        ]
+        name "right_wheel"
+        boundingObject USE WHEEL_SHAPE
+        physics Physics {
+        }
+      }
+    }
+    Solid {
+      translation 0.12 0 -0.06
+      children [
+        DEF CASTER_SHAPE Shape {
+          appearance PBRAppearance {
+            baseColor 0.8 0.8 0.8
+          }
+          geometry Sphere {
+            radius 0.015
+          }
+        }
+      ]
+      name "caster_wheel"
+      boundingObject USE CASTER_SHAPE
+      physics Physics {
+      }
+    }
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.1 0.1 0.1
+      }
+      geometry Cylinder {
+        height 0.087
+        radius 0.17
+      }
+    }
+    Lidar {
+      translation 0.15 0 0
+      name "clearview_lidar"
+      horizontalResolution 256
+      fieldOfView 3.14159
+      numberOfLayers 1
+    }
+    TouchSensor {
+      translation 0.12 0 0
+      name "bumper"
+      boundingObject Box {
+        size 0.08 0.26 0.08
+      }
+    }
+    DistanceSensor {
+      translation 0 -0.16 0
+      rotation 0 0 1 -1.570796
+      name "wall_sensor"
+      lookupTable [
+        0 1000 0
+        0.2 0 0
+      ]
+    }
+    DistanceSensor {
+      translation 0.16 0 -0.04
+      rotation 0 1 0 1.570796
+      name "carpet_sensor"
+      lookupTable [
+        0 1000 0
+        0.1 0 0
+      ]
+    }
+    DistanceSensor {
+      translation 0.12 0.08 -0.05
+      rotation 0 1 0 1.570796
+      name "cliff_sensor_left"
+      lookupTable [
+        0 1000 0
+        0.2 0 0
+      ]
+      type "infra-red"
+    }
+    DistanceSensor {
+      translation 0.12 -0.08 -0.05
+      rotation 0 1 0 1.570796
+      name "cliff_sensor_right"
+      lookupTable [
+        0 1000 0
+        0.2 0 0
+      ]
+      type "infra-red"
+    }
+    DistanceSensor {
+      translation 0.03 0.15 -0.05
+      rotation 0 1 0 1.570796
+      name "cliff_sensor_front_left"
+      lookupTable [
+        0 1000 0
+        0.2 0 0
+      ]
+      type "infra-red"
+    }
+    DistanceSensor {
+      translation 0.03 -0.15 -0.05
+      rotation 0 1 0 1.570796
+      name "cliff_sensor_front_right"
+      lookupTable [
+        0 1000 0
+        0.2 0 0
+      ]
+      type "infra-red"
+    }
+    GPS {
+    }
+    Compass {
+    }
+    LED {
+      translation 0.05 0 0.044
+      name "status_led"
+      color [
+        0 1 0
+      ]
+    }
+    LED {
+      translation -0.05 0 0.044
+      name "battery_led"
+    }
+  ]
+  boundingObject Cylinder {
+    height 0.087
+    radius 0.17
+  }
+  physics Physics {
+    density -1
+    mass 3.5
+    centerOfMass [
+      0 0 -0.05
+    ]
+  }
+  controller "roomba_controller"
+  battery [
+    10000, 10000, 100
+  ]
+}
+Solid {
+  translation -1 1 0.005
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.9 1 1
+        roughness 0.9
+      }
+      geometry Box {
+        size 2.5 1.8 0.01
+      }
+    }
+  ]
+  name "living_room_rug"
+  boundingObject Box {
+    size 2.5 1.8 0.01
+  }
+}
+Solid {
+  translation -1 2 0.2
+  children [
+    Pose {
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.5 0.5 0.5
+          }
+          geometry Box {
+            size 2.2 0.8 0.4
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0 0.3 0.35
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.5 0.5 0.5
+          }
+          geometry Box {
+            size 2.2 0.2 0.5
+          }
+        }
+      ]
+    }
+  ]
+  name "sofa"
+  boundingObject Group {
+    children [
+      Pose {
+        children [
+          Box {
+            size 2.2 0.8 0.4
+          }
+        ]
+      }
+      Pose {
+        translation 0 0.3 0.35
+        children [
+          Box {
+            size 2.2 0.2 0.5
+          }
+        ]
+      }
+    ]
+  }
+}
+Solid {
+  translation -1 -0.2 0.2
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.15 0.15 0.15
+        roughness 0.5
+      }
+      geometry Box {
+        size 2 0.4 0.4
+      }
+    }
+  ]
+  name "tv_cabinet"
+  boundingObject Box {
+    size 2 0.4 0.4
+  }
+}
+Solid {
+  translation -1 -0.2 0.65
+  children [
+    Pose {
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.02 0.02 0.02
+            roughness 0.2
+          }
+          geometry Box {
+            size 1.2 0.05 0.7
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0 0 -0.2
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.1 0.1 0.1
+          }
+          geometry Box {
+            size 0.4 0.2 0.05
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0 0 -0.1
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.1 0.1 0.1
+          }
+          geometry Box {
+            size 0.1 0.05 0.2
+          }
+        }
+      ]
+    }
+  ]
+  name "tv_screen"
+  boundingObject Group {
+    children [
+      Pose {
+        children [
+          Box {
+            size 1.2 0.05 0.7
+          }
+        ]
+      }
+      Pose {
+        translation 0 0 -0.2
+        children [
+          Box {
+            size 0.4 0.2 0.05
+          }
+        ]
+      }
+    ]
+  }
+}
+Table {
+  translation 2 -1 0
+  name "dining_table"
+}
+Chair {
+  translation 1.5 -1 0
+  name "dining_chair_west"
+}
+Chair {
+  translation 2.5 -1 0
+  rotation 0 0 1 3.141592653589793
+  name "dining_chair_east"
+}
+Chair {
+  translation 2 -0.1 0
+  rotation 0 0 1 -1.570795613280012
+  name "dining_chair_north"
+}
+Chair {
+  translation 2 -1.9 0
+  rotation 0 0 1 1.5707996938995747
+  name "dining_chair_south"
+}

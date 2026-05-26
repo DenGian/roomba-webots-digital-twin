@@ -1,0 +1,40 @@
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Python
+*.pyc
+__pycache__/
+
+# Java
+*.class
+*.log
+*.jar
+
+# macOS
+.DS_Store
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# IDEs
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Temporary files
+*.bak
+*.swp
+*.swo
+*.tmp
+
+# JetBrains IDEs
+*.iml

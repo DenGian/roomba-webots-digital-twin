@@ -183,6 +183,9 @@ Charger {
     ]
   }
   radius 0.4
+  battery [
+    10000, 10000, 1000
+  ]
 }
 Robot {
   translation 2 2.6 0.075
@@ -376,7 +379,7 @@ Robot {
   }
   controller "roomba_controller"
   battery [
-    10000, 10000, 100
+    10000, 10000, 1000
   ]
 }
 Solid {

@@ -1,191 +1,1057 @@
-"""roomba_controller controller - Herstel naar Stap 3.4 (Inclusief Carpet & Timer)."""
-
 from controller import Robot
 import math
+import random
 
-# region Helper Functies
-def get_bearing_in_degrees(compass):
-    north = compass.getValues()
-    if not north or math.isnan(north[0]):
-        return 0.0
-    rad = math.atan2(north[0], north[1])
-    bearing = (rad / math.pi) * 180.0
-    if bearing < 0.0:
-        bearing += 360.0
-    return bearing
-# endregion
 
-# region Initialisatie en Setup
-robot = Robot()
+# ──────────────────────────────────────────────────────────────────────────────
+# PID-REGELAAR  (conform design specification "Theorie regelaars" — ongewijzigd)
+# ──────────────────────────────────────────────────────────────────────────────
+class PID_Controller:
+    """
+    PID controller conform de design project.
+      Kp  = proportionele versterkingsfactor
+      Ki  = integrerende versterkingsfactor (0.0 = uitgeschakeld)
+      Kd  = differentiërende versterkingsfactor (0.0 = uitgeschakeld)
+      SP  = setpoint (gewenste waarde)
+      LMN_HLM / LMN_LLM = hoge / lage limiet van de regeluitgang
+    """
+    def __init__(self, iKp, iKi, iKd, iSP, iLMN_HLM, iLMN_LLM):
+        self.Kp       = iKp
+        self.Ki       = iKi
+        self.Kd       = iKd
+        self.SP       = iSP
+        self.prev_ER  = 0.0
+        self.integral = 0.0
+        self.LMN_HLM  = iLMN_HLM
+        self.LMN_LLM  = iLMN_LLM
+
+    def compute(self, iPV, iTimestep):
+        ER = self.SP - iPV
+        P_out = self.Kp * ER
+        self.integral += ER * iTimestep
+        I_out = self.Ki * self.integral
+        derivative = (ER - self.prev_ER) / iTimestep if iTimestep > 0 else 0.0
+        D_out = self.Kd * derivative
+        oLMN = max(self.LMN_LLM, min(self.LMN_HLM, P_out + I_out + D_out))
+        self.prev_ER = ER
+        return oLMN
+
+    def reset(self, new_SP=None):
+        self.integral = 0.0
+        self.prev_ER  = 0.0
+        if new_SP is not None:
+            self.SP = new_SP
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# HULPFUNCTIES
+# ──────────────────────────────────────────────────────────────────────────────
+def clamp(value, lo, hi):
+    return max(lo, min(value, hi))
+
+def angle_error(target, current):
+    """
+    Kortste hoekafstand [°] in [-180, 180].
+    Positief = target is CW van current.
+        err > 0 → CW  → set_motors(+, -)
+        err < 0 → CCW → set_motors(-, +)
+    """
+    err = target - current
+    while err >  180.0: err -= 360.0
+    while err < -180.0: err += 360.0
+    return err
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CONSTANTEN
+# ──────────────────────────────────────────────────────────────────────────────
+MAX_SPEED        = 6.28
+BATTERY_MAX      = 10_000.0
+BATTERY_LOW_PCT  = 0.20          # terugkeerdrempel: 20% resterend
+ROAMING_DURATION = 1200.0         # 5 minuten per reinigingsfase (veiligheidsback-up)
+
+# Lidar sectoren (256 rays, 180° FOV; index 0=LINKS, 128=VOOR, 255=RECHTS)
+_L0,  _L1  =   0,  64
+_FL0, _FL1 =  64, 112
+_F0,  _F1  = 112, 144
+_FR0, _FR1 = 144, 192
+_R0,  _R1  = 192, 256
+
+OBSTACLE_DIST     = 0.35   # stop/draai drempel voor VOOR-sectoren
+FAR_OBSTACLE_DIST = 0.28   # FIX-4A: zachtere zij-reactie (was 0.35 → grove bochten)
+SLOW_DIST         = 0.65
+
+# Tapijt drempelwaarden (lookupTable: 0→1000, 0.1→0; vloer-baseline ≈ 650)
+CARPET_FULL   = 730
+CARPET_EDGE   = 670
+
+# Tapijt GPS-grenzen (rug: translation -1 1, size 2.5×1.8)
+# Gebruikt voor sensor-validatie van tapijt-detectie (FIX-2) en DWEILEN-skip
+CARPET_X_MIN  = -2.25
+CARPET_X_MAX  =  0.30
+CARPET_Y_MIN  =  0.05
+CARPET_Y_MAX  =  1.95
+CARPET_SAFE_X =  1.20   # veilig doel-X (oost van tapijt) bij tapijt-ontsnapping
+
+# Docking geometrie
+CHARGER_X           = 2.00
+CHARGER_Y           = 2.85
+PREDOCK_X           = 2.00
+PREDOCK_Y           = 1.80
+DOCK_ARM_Y          = 2.55
+DOCK_CONFIRM_Y      = 2.70
+DOCK_STALL_RADIUS_Y = 2.45
+
+# Timing
+ALIGNING_THRESHOLD = 6.0    # BUG-16 FIX: was 4.0° → timeout bij 4.6°
+ALIGNING_TIMEOUT   = 10.0
+DOCKING_TIMEOUT    = 45.0   # verlengd voor betere betrouwbaarheid (was 30.0)
+CHARGING_MAX_TIME  = 90.0
+
+# Boustrophedon navigatie (ClearView™ LiDAR stijl — "schoon in rechte banen")
+# Bronvermelding: irobot.com — "navigeert met ClearView™ LiDAR, wand-tot-wand"
+BOUS_Y_MIN      = -2.40
+BOUS_Y_MAX      =  2.20
+BOUS_X_MIN      = -2.40
+BOUS_X_MAX      =  2.40
+BOUS_STRIP_STEP =  0.35
+BOUS_WP_RADIUS  =  0.22   # FIX-7B: 0.40 → 0.22m (betere wanddekking)
+
+# FIX-7A: Dynamische obstakeldetectie via frustration timeout
+# Vervangt alle hardcoded meubelconstanten (TABLE_*, SOFA_*).
+# Als robot >WP_FRUSTRATION_TIME sec geen vooruitgang maakt → waypoint overgeslagen.
+WP_FRUSTRATION_TIME = 5.0   # seconden zonder vooruitgang (>0.04m) → skip
+
+# FIX-7C: Vloeiender rijgedrag
+SPEED_RAMP      = 5.0    # versnellingsramp: MAX_SPEED/s
+LOOK_AHEAD_DIST = 0.55   # m — begin look-ahead naar volgend waypoint binnen deze afstand
+
+# Stuck-detectie: positie-gebaseerd (geïnspireerd op encodertelling, zie classmate-analyse)
+# Als robot >STUCK_TIMEOUT sec minder dan STUCK_DIST m beweegt → ESCAPE-spin
+STUCK_TIMEOUT   = 10.0   # seconden zonder STUCK_DIST beweging → stuck
+STUCK_DIST      = 0.05   # m minimale verwachte verplaatsing in STUCK_TIMEOUT sec
+
+# Frustration-timer drempel: pas activeren als robot dicht bij waypoint is
+# (ver weg: obstakelomzeiling is verwacht — geen vals positief frustration)
+WP_NEAR_THRESH  = 1.5    # m — alleen frustration-tracking binnen deze afstand
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CONTROLLER
+# ──────────────────────────────────────────────────────────────────────────────
+class RoombaController:
+
+    CLEANING_STATES = ("STOFZUIGEN", "DWEILEN")
+
+    def __init__(self, robot, timestep):
+        self.robot    = robot
+        self.timestep = timestep
+        self.dt       = timestep / 1000.0
+
+        # State machine
+        self.state      = "UNDOCKING"
+        self.prev_state = "STOFZUIGEN"   # terugkeer-state na ESCAPE
+
+        # FEAT-1: Missiecyclus
+        self.mission_phase      = "STOFZUIGEN"  # start altijd met stofzuigen
+        self.roaming_start_time = 0.0            # BUG-15 FIX: relatieve timer
+
+        # UNDOCKING
+        self.undock_phase = "REVERSE"
+        self.undock_timer = 0.0
+
+        # ESCAPE
+        self.escape_reverse_end = 0.0
+        self.escape_end_time    = 0.0
+        self.turn_direction     = 1
+        self.evasion_count      = 0
+        self.last_evasion_time  = 0.0
+
+        # Tapijt-ontsnapping (GPS-gestuurd, DWEILEN-only)
+        self.in_carpet_escape    = False
+        self.carpet_escape_count = 0
+
+        # Boustrophedon (ClearView™ LiDAR navigatie — rechte banen, wand-tot-wand)
+        self.bous_waypoints = self._generate_waypoints()
+        self.bous_wp_idx    = 0
+
+        # FIX-7A: Waypoint frustration tracking (vervangt hardcoded meubelzones)
+        self.wp_prev_dist     = float('inf')
+        self.wp_progress_time = 0.0   # tijdstip van laatste betekenisvolle vooruitgang
+
+        # FIX-7C: Speed ramping voor vloeiender rijgedrag
+        self.cleaning_speed = 0.0     # huidige gerampte rijsnelheid (rad/s)
+
+        # Stuck-detectie (positie-gebaseerd)
+        self.stuck_check_pos  = None
+        self.stuck_check_time = 0.0
+
+        # RETURNING timer (adaptieve tolerantie) + tussentijds routepunt (FIX-6C)
+        self.returning_start_time = 0.0
+        self.returning_via        = None
+
+        # PID koersregeling (conform design project, ongewijzigd)
+        self.pid_bearing = PID_Controller(
+            iKp=0.045, iKi=0.0, iKd=0.001,
+            iSP=0.0,
+            iLMN_HLM= 0.45 * MAX_SPEED,
+            iLMN_LLM=-0.45 * MAX_SPEED
+        )
+
+        # Docking
+        self.aligning_start_time = 0.0
+        self.docking_start_time  = 0.0
+        self.dock_last_y         = 0.0
+        self.dock_stall_timer    = 0.0
+
+        # Charging
+        self.charging_start_time = 0.0
+        self.last_charge_time    = None
+
+        # Telemetrie
+        self.last_logged_pct = 110
+        self.last_carpet_log = -99.0
+
+        # Watchdog
+        self.prev_cycle_time = 0.0
+
+        self._setup_devices()
+        self._set_leds("UNDOCKING")
+        print(f"[SYSTEEM] Controller v5.6 gestart. State: {self.state}")
+        print(f"[SYSTEEM] Batterij max: {BATTERY_MAX:.0f} J | "
+              f"Terugkeerdrempel: {BATTERY_LOW_PCT*100:.0f}% | "
+              f"Roaming: {ROAMING_DURATION:.0f}s per fase")
+        print(f"[SYSTEEM] Navigatie: dynamisch (geen hardcoded meubelzones) | "
+              f"WP-radius: {BOUS_WP_RADIUS}m | Frustration: {WP_FRUSTRATION_TIME}s")
+        print(f"[MISSIE]  Fase 1: {self.mission_phase}")
+
+    # ── devices ───────────────────────────────────────────────────────────────
+    def _setup_devices(self):
+        self.motor_left  = self.robot.getDevice('motor_left')
+        self.motor_right = self.robot.getDevice('motor_right')
+        for m in (self.motor_left, self.motor_right):
+            m.setPosition(float('inf'))
+            m.setVelocity(0.0)
+
+        self.lidar = self.robot.getDevice('clearview_lidar')
+        self.lidar.enable(self.timestep)
+        self.lidar.enablePointCloud()
+
+        self.robot.batterySensorEnable(self.timestep)
+
+        self.bumper = self.robot.getDevice('bumper')
+        self.bumper.enable(self.timestep)
+
+        self.wall_sensor = self.robot.getDevice('wall_sensor')
+        self.wall_sensor.enable(self.timestep)
+
+        self.carpet_sensor = self.robot.getDevice('carpet_sensor')
+        self.carpet_sensor.enable(self.timestep)
+
+        self.cliff_sensors = []
+        for name in ('cliff_sensor_left', 'cliff_sensor_right',
+                     'cliff_sensor_front_left', 'cliff_sensor_front_right'):
+            s = self.robot.getDevice(name)
+            s.enable(self.timestep)
+            self.cliff_sensors.append(s)
+
+        self.gps     = self.robot.getDevice('gps')
+        self.gps.enable(self.timestep)
+        self.compass = self.robot.getDevice('compass')
+        self.compass.enable(self.timestep)
+
+        self.status_led  = self.robot.getDevice('status_led')
+        self.battery_led = self.robot.getDevice('battery_led')
+
+    # ── actuatoren ────────────────────────────────────────────────────────────
+    def set_motors(self, left, right):
+        self.motor_left.setVelocity(clamp(left,  -MAX_SPEED, MAX_SPEED))
+        self.motor_right.setVelocity(clamp(right, -MAX_SPEED, MAX_SPEED))
+
+    def _set_leds(self, state):
+        """
+        LED-sturing per state (conform system requirements):
+          STOFZUIGEN : status aan        (actief stofzuigen)
+          DWEILEN    : beide aan         (dweilmodus zichtbaar)
+          ESCAPE     : beide uit         (noodstop)
+          RETURNING  : beide aan         (terugkeer naar lader)
+          ALIGNING   : status aan        (uitlijnen)
+          DOCKING    : status aan        (insturen lader)
+          CHARGING   : beide uit         (stilstaand laden)
+          UNDOCKING  : status aan        (losschieten lader)
+        """
+        leds = {
+            "STOFZUIGEN": (1, 0),
+            "DWEILEN":    (1, 1),
+            "ESCAPE":     (0, 0),
+            "RETURNING":  (1, 1),
+            "ALIGNING":   (1, 0),
+            "DOCKING":    (1, 0),
+            "CHARGING":   (0, 0),
+            "UNDOCKING":  (1, 0),
+        }
+        s, b = leds.get(state, (1, 0))
+        self.status_led.set(s)
+        self.battery_led.set(b)
+
+    # ── bearing ───────────────────────────────────────────────────────────────
+    def get_bearing(self):
+        val = self.compass.getValues()
+        if not val or math.isnan(val[0]):
+            return 0.0
+        deg = math.degrees(math.atan2(val[1], val[0]))
+        return deg + 360.0 if deg < 0.0 else deg
+
+    # ── lidar ─────────────────────────────────────────────────────────────────
+    def _lidar_min(self, start, end):
+        sector = [r for r in self.ranges[start:end] if 0.02 < r != float('inf')]
+        return min(sector) if sector else float('inf')
+
+    def _read_lidar_sectors(self):
+        if not self.ranges:
+            self.d_far_left = self.d_front_left = self.d_front = \
+                self.d_front_right = self.d_far_right = float('inf')
+            return
+        self.d_far_left    = self._lidar_min(_L0,  _L1)
+        self.d_front_left  = self._lidar_min(_FL0, _FL1)
+        self.d_front       = self._lidar_min(_F0,  _F1)
+        self.d_front_right = self._lidar_min(_FR0, _FR1)
+        self.d_far_right   = self._lidar_min(_R0,  _R1)
+
+    # ── boustrophedon waypoint-generatie ──────────────────────────────────────
+    def _generate_waypoints(self):
+        """
+        Genereer een uniform zigzag-rasterpatroon over de volledige vloer.
+
+        Gebaseerd op ClearView™ LiDAR navigatieprincipe van de echte Roomba® 205:
+        'maximizes floor-cleaning coverage wall-to-wall, cleans in neat rows'
+        (bron: irobot.com)
+
+        FIX-7A: GEEN meubelzone-clipping meer. Alle waypoints lopen van
+        BOUS_X_MIN (-2.40m) tot BOUS_X_MAX (+2.40m) — wand-tot-wand.
+        Obstakels worden dynamisch omzeild via:
+          1. Reactieve LiDAR-ontwijking (prioriteit 1)
+          2. Waypoint frustration timeout (WP_FRUSTRATION_TIME sec zonder
+             vooruitgang → waypoint overgeslagen)
+        Dit zorgt ervoor dat de robot correct werkt ongeacht meubelposities,
+        net zoals de echte Roomba 205 dat doet.
+        """
+        pts = []
+        y = BOUS_Y_MIN
+        going_east = True
+        while y <= BOUS_Y_MAX + 0.01:
+            yr = round(y, 2)
+            if going_east:
+                pts.append((BOUS_X_MIN, yr))
+                pts.append((BOUS_X_MAX, yr))
+            else:
+                pts.append((BOUS_X_MAX, yr))
+                pts.append((BOUS_X_MIN, yr))
+            y += BOUS_STRIP_STEP
+            going_east = not going_east
+        return pts
+
+    # ── sensoren ──────────────────────────────────────────────────────────────
+    def _read_sensors(self):
+        self.battery    = self.robot.batterySensorGetValue()
+        self.wall_val   = self.wall_sensor.getValue()
+        self.carpet_val = self.carpet_sensor.getValue()
+        self.ranges     = self.lidar.getRangeImage()
+        self.bumper_hit = self.bumper.getValue()
+        self.cliff_hit  = any(s.getValue() < 100.0 for s in self.cliff_sensors)
+        self.pos        = self.gps.getValues()
+        self.bearing    = self.get_bearing()
+        self._read_lidar_sectors()
+
+        pct = int((self.battery / BATTERY_MAX) * 100) if self.battery >= 0 else 0
+        if pct % 10 == 0 and pct != self.last_logged_pct and 0 <= pct <= 100:
+            print(f"[BATTERIJ] {pct}% ({self.battery:.0f} J)")
+            self.last_logged_pct = pct
+        if pct <= 20 and self.state not in ("CHARGING", "DOCKING"):
+            self.battery_led.set(1)
+
+    # ── watchdog ──────────────────────────────────────────────────────────────
+    def _watchdog(self, t):
+        elapsed = t - self.prev_cycle_time
+        if elapsed > 0.150 and self.prev_cycle_time > 0:
+            print(f"[WATCHDOG] Cyclustijd overschreden: {elapsed:.3f}s")
+        self.prev_cycle_time = t
+
+    # ── noodstop ──────────────────────────────────────────────────────────────
+    def _check_emergencies(self, t):
+        """Bumper of afgrond → ESCAPE. Actief in reinigingsstates en RETURNING."""
+        if self.state not in (*self.CLEANING_STATES, "RETURNING"):
+            return
+
+        # FIX-3: bij lage batterij tijdens RETURNING geen ESCAPE meer.
+        # Verhoogd naar 15% (was 8%): logs tonen dat bumper-hits tijdens RETURNING
+        # ESCAPE-lussen veroorzaken die de resterende batterij volledig uitputten.
+        # Robot rijdt direct naar charger; botsingsschade weegt niet op tegen zeker
+        # energieverlies door eindeloze ESCAPE-spiraal.
+        if self.state == "RETURNING" and self.battery < 0.15 * BATTERY_MAX:
+            return
+
+        trigger = ""
+        if self.bumper_hit > 0.0:
+            trigger = "BUMPER"
+        elif self.cliff_hit:
+            trigger = "AFGROND"
+        if not trigger:
+            return
+
+        battery_low = self.battery < (BATTERY_LOW_PCT * BATTERY_MAX)
+        time_up     = (t - self.roaming_start_time) >= ROAMING_DURATION
+        self.prev_state = "RETURNING" if (battery_low or time_up) else self.state
+
+        self.in_carpet_escape = False
+
+        print(f"[NOODSTOP] {trigger} in '{self.state}' → ESCAPE "
+              f"(daarna '{self.prev_state}')")
+        self.state = "ESCAPE"
+        self._set_leds("ESCAPE")
+
+        if t - self.last_evasion_time < 6.0:
+            self.evasion_count += 1
+        else:
+            self.evasion_count = 1
+        self.last_evasion_time = t
+
+        if self.evasion_count >= 3:
+            print("[WATCHDOG] Hoeksituatie → 180°-rotatie.")
+            self.escape_reverse_end = t + 1.0
+            self.escape_end_time    = self.escape_reverse_end + 2.2
+            self.turn_direction     = 1
+            self.evasion_count      = 0
+        else:
+            self.escape_reverse_end = t + 1.0
+            self.escape_end_time    = self.escape_reverse_end + random.uniform(0.8, 1.6)
+            if self.wall_val > 200.0:
+                self.turn_direction = -1
+            elif self.d_far_right < self.d_far_left:
+                self.turn_direction = -1
+            else:
+                self.turn_direction = 1
+
+    # ── tapijt-ontsnapping (alleen DWEILEN) ───────────────────────────────────
+    def _on_carpet_gps(self):
+        return (CARPET_X_MIN <= self.pos[0] <= CARPET_X_MAX and
+                CARPET_Y_MIN <= self.pos[1] <= CARPET_Y_MAX)
+
+    def _handle_carpet_escape(self, t):
+        """
+        GPS-gestuurde tapijtvermijding voor DWEILEN.
+        Zet in_carpet_escape EENMALIG; navigeer naar X=CARPET_SAFE_X.
+        Returns True als ontsnapping actief is.
+
+        FIX-2: GPS-gevalideerde tapijt-trigger – vermijdt vals positieven
+        bij TV-kast (X≈2.62) en lader (X≈2.39) door vloer-oneffenheden.
+        """
+        gps_on   = self._on_carpet_gps()
+        gps_near = (-2.55 <= self.pos[0] <= 0.55 and
+                    -0.20 <= self.pos[1] <= 2.20)
+        trigger  = (self.carpet_val > CARPET_FULL or
+                    (self.carpet_val > CARPET_EDGE and gps_near))
+
+        if not self.in_carpet_escape and (trigger or gps_on):
+            self.in_carpet_escape    = True
+            self.carpet_escape_count += 1
+            print(f"[TAPIJT] Ontsnapping #{self.carpet_escape_count} "
+                  f"(sensor={self.carpet_val:.0f}, "
+                  f"GPS={self.pos[0]:.2f},{self.pos[1]:.2f}) → X={CARPET_SAFE_X}")
+            self.last_carpet_log = t
+
+        if not self.in_carpet_escape:
+            return False
+
+        sensor_clear = self.carpet_val < (CARPET_EDGE - 30)
+        if sensor_clear and not gps_on:
+            self.in_carpet_escape = False
+            print(f"[TAPIJT] Vrij "
+                  f"(sensor={self.carpet_val:.0f}, "
+                  f"GPS={self.pos[0]:.2f},{self.pos[1]:.2f})")
+            return False
+
+        # Navigeer richting CARPET_SAFE_X (oost van tapijt)
+        dx = CARPET_SAFE_X - self.pos[0]
+        dy = clamp(self.pos[1], -2.5, 2.5) - self.pos[1]
+        tb = math.degrees(math.atan2(dx, dy))
+        if tb < 0.0:
+            tb += 360.0
+        err  = angle_error(tb, self.bearing)
+        turn = clamp(0.05 * err, -0.35 * MAX_SPEED, 0.35 * MAX_SPEED)
+        self.set_motors(0.45 * MAX_SPEED + turn, 0.45 * MAX_SPEED - turn)
+        return True
+
+    # ── gedeelde reinigingslogica ─────────────────────────────────────────────
+    def _execute_cleaning(self, t, allow_carpet):
+        """
+        Gedeelde rijlogica voor STOFZUIGEN en DWEILEN.
+        allow_carpet=True  → tapijt mag (STOFZUIGEN)
+        allow_carpet=False → tapijt vermijden (DWEILEN)
+
+        Navigatieprioriteiten:
+          1. Terugkeer bij lage batterij of tijdslimiet
+          2. Tapijtvermijding via carpet-sensor + GPS (DWEILEN only)
+          3. LiDAR obstakel-ontwijking (reactieve laag, altijd actief)
+          4. Boustrophedon GPS-navigatie (ClearView™ LiDAR stijl, wand-tot-wand)
+             + FIX-7A frustration timeout (dynamisch, geen hardcoded meubels)
+             + FIX-7C speed ramping + look-ahead (vloeiender rijgedrag)
+        """
+        # ── Prioriteit 1: Controleer batterij en tijdslimiet ──────────────
+        battery_low = self.battery < (BATTERY_LOW_PCT * BATTERY_MAX)
+        time_up     = (t - self.roaming_start_time) >= ROAMING_DURATION
+
+        if battery_low or time_up:
+            reason = "tijdslimiet 5 min" if time_up else f"lage batterij ({BATTERY_LOW_PCT*100:.0f}%)"
+            print(f"[STATE CHANGE] {self.state} → RETURNING ({reason})")
+            self.pid_bearing.reset()
+            self.in_carpet_escape     = False
+            self.returning_start_time = 0.0   # FIX-5: herstart RETURNING-timer
+            self.cleaning_speed       = 0.0   # FIX-7C: reset speed ramp
+            self.state = "RETURNING"
+            self._set_leds("RETURNING")
+            return
+
+        # ── Prioriteit 2: Tapijtvermijding (DWEILEN only) ─────────────────
+        if not allow_carpet:
+            if self._handle_carpet_escape(t):
+                return
+
+        # ── Prioriteit 3: LiDAR obstakel-ontwijking ───────────────────────
+        obs_front       = self.d_front       < OBSTACLE_DIST
+        obs_front_left  = self.d_front_left  < OBSTACLE_DIST
+        obs_front_right = self.d_front_right < OBSTACLE_DIST
+        # FIX-4A: FAR_OBSTACLE_DIST (0.28m) voor zij-sectoren → zachter bijsturen
+        obs_far_left    = self.d_far_left    < FAR_OBSTACLE_DIST
+        obs_far_right   = self.d_far_right   < FAR_OBSTACLE_DIST
+        slow_front      = self.d_front       < SLOW_DIST
+
+        any_obstacle = (obs_front or obs_front_left or obs_front_right
+                        or obs_far_left or obs_far_right)
+
+        if any_obstacle:
+            # FIX-7C: verlaag gerampte snelheid bij obstakel; bij terugkeer naar
+            # vrije rijden start robot vloeiend opnieuw in plaats van abrupt.
+            self.cleaning_speed = max(0.0,
+                                      self.cleaning_speed - 0.15 * MAX_SPEED)
+
+        if obs_front:
+            # Rechtstreeks obstakel voor → draai naar meest open kant
+            if self.d_far_left >= self.d_far_right:
+                self.set_motors(-0.20 * MAX_SPEED, 0.55 * MAX_SPEED)
+            else:
+                self.set_motors(0.55 * MAX_SPEED, -0.20 * MAX_SPEED)
+
+        elif obs_front_left and obs_front_right:
+            # FIX-4B: smal-doorgang detectie (bijv. tussen stoelpoten)
+            # Als er ruimte vóór de robot is maar beide voor-zij-sectoren geblokkeerd
+            # → langzaam rechtdoor kruipen i.p.v. draaien.
+            if self.d_front > 0.50:
+                self.set_motors(0.25 * MAX_SPEED, 0.25 * MAX_SPEED)
+            else:
+                if self.d_far_left >= self.d_far_right:
+                    self.set_motors(-0.20 * MAX_SPEED, 0.55 * MAX_SPEED)
+                else:
+                    self.set_motors(0.55 * MAX_SPEED, -0.20 * MAX_SPEED)
+
+        elif obs_front_left and not obs_front_right:
+            self.set_motors(0.58 * MAX_SPEED, 0.12 * MAX_SPEED)
+
+        elif obs_front_right and not obs_front_left:
+            self.set_motors(0.12 * MAX_SPEED, 0.58 * MAX_SPEED)
+
+        elif obs_far_left and not obs_far_right:
+            self.set_motors(0.52 * MAX_SPEED, 0.30 * MAX_SPEED)
+
+        elif obs_far_right and not obs_far_left:
+            self.set_motors(0.30 * MAX_SPEED, 0.52 * MAX_SPEED)
+
+        elif slow_front:
+            base = 0.35 * MAX_SPEED
+            if self.d_front_left >= self.d_front_right:
+                self.set_motors(base * 0.6, base)
+            else:
+                self.set_motors(base, base * 0.6)
+
+        else:
+            # ── Prioriteit 4: Boustrophedon GPS-navigatie ─────────────────
+            # "Cleans in neat rows, wall-to-wall" — irobot.com / ClearView™ LiDAR
+            # Geen hardcoded meubelzones; dynamisch via LiDAR + frustration timeout.
+
+            # DWEILEN: sla volledige stroken over waarvan Y in tapijt-zone valt.
+            # Reden: ook al ligt het waypoint zelf buiten het tapijt (bijv. X=+2.4),
+            # de route erheen kruist het tapijt. Door op Y-niveau te filteren wordt
+            # het tapijt nooit doorkruist, ongeacht de richting (oost of west).
+            if not allow_carpet:
+                skips = 0
+                while skips < len(self.bous_waypoints):
+                    wx, wy = self.bous_waypoints[self.bous_wp_idx]
+                    in_carpet_strip = (CARPET_Y_MIN - 0.20 <= wy <= CARPET_Y_MAX + 0.20)
+                    if in_carpet_strip:
+                        self.bous_wp_idx = (self.bous_wp_idx + 1) % len(self.bous_waypoints)
+                        # Reset frustration bij nieuw waypoint door skip
+                        self.wp_progress_time = t
+                        self.wp_prev_dist     = float('inf')
+                        skips += 1
+                    else:
+                        break
+
+            wp_x, wp_y = self.bous_waypoints[self.bous_wp_idx]
+            dx_wp  = wp_x - self.pos[0]
+            dy_wp  = wp_y - self.pos[1]
+            dist_wp = math.hypot(dx_wp, dy_wp)
+
+            # ── FIX-7A: Waypoint frustration timeout ──────────────────────
+            # Alleen actief als robot dicht bij waypoint is (< WP_NEAR_THRESH).
+            # Ver weg is obstakelomzeiling gewoon; frustration zou dan vals positief
+            # vuren (logs: WP#0 (-2.4,-2.4) en oost-waypoints onterecht geskipt).
+            if dist_wp < WP_NEAR_THRESH:
+                # Initialiseer tracking bij eerste aanroep of na reset
+                if self.wp_progress_time == 0.0:
+                    self.wp_progress_time = t
+                    self.wp_prev_dist     = dist_wp
+
+                if dist_wp < self.wp_prev_dist - 0.04:
+                    # Betekenisvolle vooruitgang (>4cm dichter bij waypoint)
+                    self.wp_progress_time = t
+                    self.wp_prev_dist     = dist_wp
+                elif (t - self.wp_progress_time) > WP_FRUSTRATION_TIME:
+                    # Dichtbij maar vastgelopen: obstakel blokkeert waypoint
+                    old_wp = self.bous_wp_idx
+                    self.bous_wp_idx = (self.bous_wp_idx + 1) % len(self.bous_waypoints)
+                    print(f"[NAVIGATIE] WP#{old_wp} ({wp_x:.1f},{wp_y:.1f}) "
+                          f"overgeslagen na {WP_FRUSTRATION_TIME:.0f}s blokkage "
+                          f"→ WP#{self.bous_wp_idx}")
+                    self.wp_progress_time = t
+                    self.wp_prev_dist     = float('inf')
+                    wp_x, wp_y = self.bous_waypoints[self.bous_wp_idx]
+                    dx_wp  = wp_x - self.pos[0]
+                    dy_wp  = wp_y - self.pos[1]
+                    dist_wp = math.hypot(dx_wp, dy_wp)
+            else:
+                # Ver van waypoint: reset frustration-timer en navigeer gewoon
+                self.wp_progress_time = 0.0
+                self.wp_prev_dist     = dist_wp
+
+            # ── Waypoint bereikt → volgende ───────────────────────────────
+            if dist_wp < BOUS_WP_RADIUS:
+                self.bous_wp_idx = (self.bous_wp_idx + 1) % len(self.bous_waypoints)
+                self.wp_progress_time = t
+                self.wp_prev_dist     = float('inf')
+                # Log elke nieuwe strook (elke 2 waypoints = 1 strook)
+                if self.bous_wp_idx % 2 == 0:
+                    next_wp = self.bous_waypoints[self.bous_wp_idx]
+                    strip_n = self.bous_wp_idx // 2
+                    total_s = len(self.bous_waypoints) // 2
+                    print(f"[NAVIGATIE] Strook {strip_n}/{total_s} → Y={next_wp[1]:.2f}")
+                wp_x, wp_y = self.bous_waypoints[self.bous_wp_idx]
+                dx_wp  = wp_x - self.pos[0]
+                dy_wp  = wp_y - self.pos[1]
+                dist_wp = math.hypot(dx_wp, dy_wp)
+
+            # ── Koers berekening naar waypoint ────────────────────────────
+            target_deg = math.degrees(math.atan2(dx_wp, dy_wp))
+            if target_deg < 0.0:
+                target_deg += 360.0
+
+            # FIX-7C: Look-ahead — mix stuursignaal met richting naar volgend
+            # waypoint zodra robot dicht genoeg bij huidig waypoint is.
+            # Resultaat: de robot begint de bocht al eerder, vloeiender.
+            if dist_wp < LOOK_AHEAD_DIST:
+                next_idx = (self.bous_wp_idx + 1) % len(self.bous_waypoints)
+                nwx, nwy = self.bous_waypoints[next_idx]
+                ndx = nwx - self.pos[0]
+                ndy = nwy - self.pos[1]
+                next_deg = math.degrees(math.atan2(ndx, ndy))
+                if next_deg < 0.0:
+                    next_deg += 360.0
+                # blend: 0.0 op LOOK_AHEAD_DIST, max 0.50 bij waypoint
+                blend = clamp(1.0 - dist_wp / LOOK_AHEAD_DIST, 0.0, 0.50)
+                diff  = angle_error(next_deg, target_deg)
+                target_deg = (target_deg + blend * diff) % 360.0
+
+            # FIX-7C: turn gain verlaagd 0.05 → 0.040 voor zachter afbuigen
+            bearing_err = angle_error(target_deg, self.bearing)
+            turn = clamp(0.040 * bearing_err, -0.35 * MAX_SPEED, 0.35 * MAX_SPEED)
+
+            # Wandsensor P-correctie (sensor gebruikt conform system requirements)
+            # Detecteert rechterwand voor zachte koersbijstelling
+            wall_corr = 0.0
+            if self.wall_val > 80.0:
+                wall_err  = 380.0 - self.wall_val
+                wall_corr = clamp(0.0008 * wall_err,
+                                  -0.06 * MAX_SPEED, 0.06 * MAX_SPEED)
+
+            total_turn = clamp(turn + wall_corr,
+                               -0.35 * MAX_SPEED, 0.35 * MAX_SPEED)
+
+            # FIX-7C: Speed ramping — graduele versnelling/vertraging
+            # Target = volle rijsnelheid; cleaning_speed ramt er naar toe.
+            # Reset naar 0.0 na ESCAPE of UNDOCKING → vloeiende herstart.
+            target_speed = 0.55 * MAX_SPEED
+            ramp_delta   = SPEED_RAMP * self.dt
+            self.cleaning_speed = clamp(
+                self.cleaning_speed + clamp(
+                    target_speed - self.cleaning_speed,
+                    -ramp_delta, ramp_delta
+                ),
+                0.0, MAX_SPEED
+            )
+
+            self.set_motors(self.cleaning_speed + total_turn,
+                            self.cleaning_speed - total_turn)
+
+    # ── stuck-detectie ────────────────────────────────────────────────────────
+    def _check_stuck(self, t):
+        """
+        Positie-gebaseerde stuck-detectie (geïnspireerd op classmate: encodertelling).
+        Als robot >STUCK_TIMEOUT sec minder dan STUCK_DIST m beweegt tijdens
+        een reinigingsstate → ESCAPE-spin om de impasse te doorbreken.
+        """
+        if self.state not in self.CLEANING_STATES:
+            # Buiten reinigingsstates: reset tracker zodat hij vers begint
+            self.stuck_check_pos  = None
+            self.stuck_check_time = 0.0
+            return
+
+        if self.stuck_check_pos is None:
+            self.stuck_check_pos  = (self.pos[0], self.pos[1])
+            self.stuck_check_time = t
+            return
+
+        moved = math.hypot(self.pos[0] - self.stuck_check_pos[0],
+                           self.pos[1] - self.stuck_check_pos[1])
+        if moved > STUCK_DIST:
+            # Voldoende beweging → reset timer
+            self.stuck_check_pos  = (self.pos[0], self.pos[1])
+            self.stuck_check_time = t
+        elif t - self.stuck_check_time > STUCK_TIMEOUT:
+            print(f"[STUCK] Geen {STUCK_DIST}m beweging in {STUCK_TIMEOUT:.0f}s "
+                  f"(pos={self.pos[0]:.2f},{self.pos[1]:.2f}) → ESCAPE-spin")
+            self.prev_state         = self.state
+            self.state              = "ESCAPE"
+            self.escape_reverse_end = t + 0.3
+            self.escape_end_time    = t + 0.3 + 1.5
+            self.turn_direction     = 1 if random.random() > 0.5 else -1
+            self.cleaning_speed     = 0.0
+            self.wp_progress_time   = 0.0
+            self.wp_prev_dist       = float('inf')
+            self.stuck_check_pos    = None
+            self.stuck_check_time   = 0.0
+            self._set_leds("ESCAPE")
+
+    # ── state machine ─────────────────────────────────────────────────────────
+    def _execute_state_machine(self, t):
+
+        # ── UNDOCKING ─────────────────────────────────────────────────────────
+        if self.state == "UNDOCKING":
+            if self.undock_timer == 0.0:
+                self.undock_timer = t
+
+            if self.undock_phase == "REVERSE":
+                self.set_motors(-0.45 * MAX_SPEED, -0.45 * MAX_SPEED)
+                if self.pos[1] < 2.1 or (t - self.undock_timer > 4.0):
+                    self.undock_phase = "TURN"
+                    self.undock_timer = t
+                    print("[UNDOCKING] Achteruit klaar → draaifase naar 180°.")
+
+            elif self.undock_phase == "TURN":
+                err = angle_error(180.0, self.bearing)
+                if abs(err) < 2.5 or (t - self.undock_timer > 5.0):
+                    self.roaming_start_time   = t
+                    self.returning_start_time = 0.0
+                    self.returning_via        = None
+                    self.in_carpet_escape     = False
+                    # FIX-7C: reset speed ramp bij start reinigingsfase
+                    self.cleaning_speed   = 0.0
+                    # FIX-7A: reset frustration tracking bij nieuw reinigingsstart
+                    self.wp_progress_time = 0.0
+                    self.wp_prev_dist     = float('inf')
+                    # FEAT-3: begin boustrophedon bij dichtstbijzijnde waypoint
+                    min_d = float('inf')
+                    for i, (wx, wy) in enumerate(self.bous_waypoints):
+                        d = math.hypot(wx - self.pos[0], wy - self.pos[1])
+                        if d < min_d:
+                            min_d = d
+                            self.bous_wp_idx = i
+                    self.state = self.mission_phase
+                    self._set_leds(self.mission_phase)
+                    print(f"[STATE CHANGE] UNDOCKING → {self.mission_phase} "
+                          f"(start t={t:.0f}s, WP#{self.bous_wp_idx}/"
+                          f"{len(self.bous_waypoints)})")
+                else:
+                    turn_sp = clamp(0.04 * abs(err),
+                                    0.08 * MAX_SPEED, 0.40 * MAX_SPEED)
+                    if err > 0:
+                        self.set_motors(turn_sp, -turn_sp)
+                    else:
+                        self.set_motors(-turn_sp, turn_sp)
+
+        # ── STOFZUIGEN ────────────────────────────────────────────────────────
+        elif self.state == "STOFZUIGEN":
+            # allow_carpet=True: robot mag over tapijt rijden (stofzuiger)
+            self._execute_cleaning(t, allow_carpet=True)
+
+        # ── DWEILEN ───────────────────────────────────────────────────────────
+        elif self.state == "DWEILEN":
+            # allow_carpet=False: tapijt vermijden (dweil mag niet op tapijt)
+            self._execute_cleaning(t, allow_carpet=False)
+
+        # ── ESCAPE ────────────────────────────────────────────────────────────
+        elif self.state == "ESCAPE":
+            if t < self.escape_reverse_end:
+                self.set_motors(-0.50 * MAX_SPEED, -0.50 * MAX_SPEED)
+            elif t < self.escape_end_time:
+                td = self.turn_direction
+                self.set_motors(td * 0.45 * MAX_SPEED, -td * 0.45 * MAX_SPEED)
+            else:
+                # FIX-7C: reset speed ramp na ESCAPE → vloeiende herstart
+                # FIX-7A: reset frustration tracking → robot krijgt verse kans
+                self.cleaning_speed   = 0.0
+                self.wp_progress_time = 0.0
+                self.wp_prev_dist     = float('inf')
+                print(f"[STATE CHANGE] ESCAPE → {self.prev_state}")
+                self.state = self.prev_state
+                self._set_leds(self.prev_state)
+
+        # ── RETURNING ─────────────────────────────────────────────────────────
+        elif self.state == "RETURNING":
+            # FIX-5: track verstreken RETURNING-tijd voor adaptieve tolerantie
+            # FIX-6C: tussentijds routepunt wanneer robot diep in tafelzone zit
+            if self.returning_start_time == 0.0:
+                self.returning_start_time = t
+                # Wiskundig bewezen: robot Y < 0.3 → rechte lijn naar predock
+                # kruist tafelzone. Omleiding via (0.5, 0.5) vermijdt dit:
+                #   (pos)→(0.5,0.5): geen tafelkruising ✅
+                #   (0.5,0.5)→predock(2.0,1.8): geen tafelkruising ✅
+                if self.pos[1] < 0.30:
+                    self.returning_via = (0.5, 0.5)
+                    print(f"[RETURNING] Robot Y={self.pos[1]:.2f} < 0.30 → "
+                          f"omleiding via tussentijds punt (0.5, 0.5)")
+                else:
+                    self.returning_via = None
+
+            # Bepaal huidige navigatiedoelstelling (via-punt of predock)
+            if self.returning_via is not None:
+                tx, ty = self.returning_via
+                if math.hypot(tx - self.pos[0], ty - self.pos[1]) < 0.35:
+                    print(f"[RETURNING] Via-punt bereikt "
+                          f"({self.pos[0]:.2f},{self.pos[1]:.2f}) → koers predock")
+                    self.returning_via = None
+                    tx, ty = PREDOCK_X, PREDOCK_Y
+            else:
+                tx, ty = PREDOCK_X, PREDOCK_Y
+
+            dx = tx - self.pos[0]
+            dy = ty - self.pos[1]
+
+            # Tolerantie-check: alleen voor finale predock-bestemming
+            if self.returning_via is None:
+                ret_elapsed = t - self.returning_start_time
+                if ret_elapsed > 120.0:
+                    tol_x, tol_y = 0.15, 0.40   # noodmodus
+                elif ret_elapsed > 60.0:
+                    tol_x, tol_y = 0.09, 0.32   # versoepeld
+                else:
+                    tol_x, tol_y = 0.06, 0.25   # nominaal (strikt voor arm-vrij)
+
+                dx_abs = abs(PREDOCK_X - self.pos[0])
+                dy_abs = abs(PREDOCK_Y - self.pos[1])
+                if dx_abs < tol_x and dy_abs < tol_y:
+                    print(f"[STATE CHANGE] RETURNING → ALIGNING "
+                          f"(X={self.pos[0]:.3f}, Y={self.pos[1]:.3f}, "
+                          f"ΔX={dx_abs:.3f}m, t_ret={ret_elapsed:.0f}s)")
+                    self.aligning_start_time  = t
+                    self.returning_start_time = 0.0
+                    self.returning_via        = None
+                    self.pid_bearing.reset(new_SP=0.0)
+                    self.state = "ALIGNING"
+                    self._set_leds("ALIGNING")
+                    return
+
+            target_deg = math.degrees(math.atan2(dx, dy))
+            if target_deg < 0.0:
+                target_deg += 360.0
+            err  = angle_error(target_deg, self.bearing)
+            turn = clamp(0.045 * err, -0.40 * MAX_SPEED, 0.40 * MAX_SPEED)
+
+            obs_front       = self.d_front       < OBSTACLE_DIST
+            obs_front_left  = self.d_front_left  < OBSTACLE_DIST
+            obs_front_right = self.d_front_right < OBSTACLE_DIST
+            obs_far_left    = self.d_far_left    < OBSTACLE_DIST
+            obs_far_right   = self.d_far_right   < OBSTACLE_DIST
+            base = 0.40 * MAX_SPEED
+
+            if obs_front or (obs_front_left and obs_front_right):
+                if self.d_far_left >= self.d_far_right:
+                    self.set_motors(-0.20 * MAX_SPEED, 0.42 * MAX_SPEED)
+                else:
+                    self.set_motors(0.42 * MAX_SPEED, -0.20 * MAX_SPEED)
+            elif obs_front_left:
+                self.set_motors(0.45 * MAX_SPEED, 0.10 * MAX_SPEED)
+            elif obs_front_right:
+                self.set_motors(0.10 * MAX_SPEED, 0.45 * MAX_SPEED)
+            elif obs_far_left and not obs_far_right:
+                self.set_motors(base + turn + 0.08 * MAX_SPEED,
+                                base - turn - 0.08 * MAX_SPEED)
+            elif obs_far_right and not obs_far_left:
+                self.set_motors(base + turn - 0.08 * MAX_SPEED,
+                                base - turn + 0.08 * MAX_SPEED)
+            else:
+                self.set_motors(base + turn, base - turn)
+
+        # ── ALIGNING ──────────────────────────────────────────────────────────
+        elif self.state == "ALIGNING":
+            err       = angle_error(0.0, self.bearing)
+            # BUG-16 FIX: drempel 4.0° → 6.0° (voorkomt timeout bij 4.6°)
+            aligned   = abs(err) < ALIGNING_THRESHOLD
+            timed_out = (t - self.aligning_start_time) > ALIGNING_TIMEOUT
+
+            if aligned or timed_out:
+                if timed_out and not aligned:
+                    print(f"[ALIGNING] Timeout → DOCKING (err={err:.1f}°)")
+                else:
+                    print(f"[STATE CHANGE] ALIGNING → DOCKING (err={err:.1f}°)")
+                self.aligning_start_time = 0.0
+                self.docking_start_time  = t
+                self.dock_last_y         = 0.0
+                self.dock_stall_timer    = t
+                self.state = "DOCKING"
+                self._set_leds("DOCKING")
+            else:
+                turn_sp = clamp(0.06 * abs(err),
+                                0.02 * MAX_SPEED, 0.18 * MAX_SPEED)
+                if err > 0:
+                    self.set_motors(turn_sp, -turn_sp)
+                else:
+                    self.set_motors(-turn_sp, turn_sp)
+
+        # ── DOCKING ───────────────────────────────────────────────────────────
+        elif self.state == "DOCKING":
+            if self.dock_last_y == 0.0:
+                self.dock_last_y      = self.pos[1]
+                self.dock_stall_timer = t
+            if self.pos[1] > self.dock_last_y + 0.02:
+                self.dock_last_y      = self.pos[1]
+                self.dock_stall_timer = t
+
+            bumper_in_dock = self.bumper_hit > 0.0 and self.pos[1] > DOCK_ARM_Y
+            gps_in_dock    = self.pos[1] > DOCK_CONFIRM_Y
+            stalled        = (t - self.dock_stall_timer) > 8.0
+
+            def _enter_charging():
+                trigger = "bumper" if (self.bumper_hit > 0 and self.pos[1] > DOCK_ARM_Y) \
+                          else f"GPS/stall Y={self.pos[1]:.2f}"
+                print(f"[STATE CHANGE] DOCKING → CHARGING "
+                      f"({trigger}, afstand={abs(CHARGER_Y - self.pos[1]):.2f}m)")
+                self.last_charge_time    = self.robot.getTime()
+                self.charging_start_time = 0.0
+                self.docking_start_time  = 0.0
+                self.dock_last_y         = 0.0
+                self.state = "CHARGING"
+                self._set_leds("CHARGING")
+                self.set_motors(0.0, 0.0)
+
+            if bumper_in_dock or gps_in_dock:
+                _enter_charging()
+            elif stalled:
+                if self.pos[1] > DOCK_STALL_RADIUS_Y:
+                    _enter_charging()
+                else:
+                    print(f"[DOCKING] Stall buiten radius (Y={self.pos[1]:.2f}) → ALIGNING")
+                    self.docking_start_time  = 0.0
+                    self.dock_last_y         = 0.0
+                    self.aligning_start_time = t
+                    self.state = "ALIGNING"
+                    self._set_leds("ALIGNING")
+                    self.set_motors(0.0, 0.0)
+            elif (t - self.docking_start_time) > DOCKING_TIMEOUT:
+                print(f"[DOCKING] Timeout → ALIGNING (Y={self.pos[1]:.2f})")
+                self.docking_start_time  = 0.0
+                self.dock_last_y         = 0.0
+                self.aligning_start_time = t
+                self.state = "ALIGNING"
+                self._set_leds("ALIGNING")
+                self.set_motors(0.0, 0.0)
+            else:
+                # FIX-1B: GPS X-correctie tijdens insturen
+                # x_err > 0 → robot links van lader → stuur rechts (CW: +L,-R)
+                # x_err < 0 → robot rechts van lader → stuur links (CCW: -L,+R)
+                x_err       = CHARGER_X - self.pos[0]
+                bearing_err = angle_error(0.0, self.bearing)
+                x_turn      = clamp(4.0 * x_err,
+                                    -0.20 * MAX_SPEED, 0.20 * MAX_SPEED)
+                b_turn      = clamp(0.02 * bearing_err,
+                                    -0.08 * MAX_SPEED, 0.08 * MAX_SPEED)
+                turn        = clamp(x_turn + b_turn,
+                                    -0.20 * MAX_SPEED, 0.20 * MAX_SPEED)
+                self.set_motors(0.12 * MAX_SPEED + turn, 0.12 * MAX_SPEED - turn)
+
+        # ── CHARGING ──────────────────────────────────────────────────────────
+        elif self.state == "CHARGING":
+            if self.charging_start_time == 0.0:
+                self.charging_start_time = t
+                pct = int((self.battery / BATTERY_MAX) * 100)
+                print(f"[CHARGING] Laadcyclus gestart "
+                      f"(t={t:.0f}s, batterij={pct}%, "
+                      f"volgende fase: "
+                      f"{'DWEILEN' if self.mission_phase == 'STOFZUIGEN' else 'STOFZUIGEN'})")
+
+            if self.pos[1] < DOCK_STALL_RADIUS_Y:
+                print(f"[CHARGING] Buiten laadzone (Y={self.pos[1]:.2f}) → DOCKING")
+                self.docking_start_time  = t
+                self.dock_last_y         = 0.0
+                self.dock_stall_timer    = t
+                self.charging_start_time = 0.0
+                self.state = "DOCKING"
+                self._set_leds("DOCKING")
+                return
+
+            self.set_motors(0.0, 0.0)
+            pct = int((self.battery / BATTERY_MAX) * 100) if self.battery >= 0 else 0
+
+            def _start_next_phase():
+                """Wissel mission_phase en start UNDOCKING."""
+                # FEAT-1: toggle na elke volledige laadcyclus
+                old_phase = self.mission_phase
+                self.mission_phase = ("DWEILEN" if old_phase == "STOFZUIGEN"
+                                      else "STOFZUIGEN")
+                t_now = self.robot.getTime()
+                dur   = t_now - self.last_charge_time if self.last_charge_time else 0
+                print(f"[STATE CHANGE] CHARGING → UNDOCKING "
+                      f"(batterij {pct}%, laadduur: {dur:.0f}s)")
+                print(f"[MISSIE] {old_phase} klaar → volgende fase: {self.mission_phase}")
+                self.last_charge_time    = t_now
+                self.charging_start_time = 0.0
+                self.state               = "UNDOCKING"
+                self.undock_phase        = "REVERSE"
+                self.undock_timer        = 0.0
+                self.in_carpet_escape    = False
+                self._set_leds("UNDOCKING")
+
+            if pct >= 95:
+                _start_next_phase()
+            elif (t - self.charging_start_time) > CHARGING_MAX_TIME:
+                print(f"[CHARGING] Fallback {CHARGING_MAX_TIME:.0f}s "
+                      f"(batterij: {pct}%) → UNDOCKING")
+                _start_next_phase()
+
+    # ── hoofdcyclus ───────────────────────────────────────────────────────────
+    def run_step(self):
+        t = self.robot.getTime()
+        self._watchdog(t)
+        self._read_sensors()
+        self._check_emergencies(t)
+        self._check_stuck(t)
+        self._execute_state_machine(t)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# WEBOTS ENTRY POINT
+# ──────────────────────────────────────────────────────────────────────────────
+robot    = Robot()
 timestep = int(robot.getBasicTimeStep())
-
-motor_left = robot.getDevice('motor_left')
-motor_right = robot.getDevice('motor_right')
-if motor_left and motor_right:
-    motor_left.setPosition(float('inf'))
-    motor_right.setPosition(float('inf'))
-    motor_left.setVelocity(0.0)
-    motor_right.setVelocity(0.0)
-
-lidar = robot.getDevice('clearview_lidar')
-if lidar:
-    lidar.enable(timestep)
-    lidar.enablePointCloud()
-
-robot.batterySensorEnable(timestep)
-
-bumper = robot.getDevice('bumper')
-if bumper: bumper.enable(timestep)
-
-wall_sensor = robot.getDevice('wall_sensor')
-if wall_sensor: wall_sensor.enable(timestep)
-
-carpet_sensor = robot.getDevice('carpet_sensor')
-if carpet_sensor: carpet_sensor.enable(timestep)
-
-gps = robot.getDevice('gps')
-if gps: gps.enable(timestep)
-
-compass = robot.getDevice('compass')
-if compass:
-    compass.enable(timestep)
-    compass.zAxis = False
-
-cliff_sensors = {
-    "left": robot.getDevice('cliff_sensor_left'),
-    "right": robot.getDevice('cliff_sensor_right'),
-    "front_left": robot.getDevice('cliff_sensor_front_left'),
-    "front_right": robot.getDevice('cliff_sensor_front_right')
-}
-for key, sensor in cliff_sensors.items():
-    if sensor: sensor.enable(timestep)
-# endregion
-
-# region Variabelen State Machine
-current_state = "ROAMING"
-max_speed = 6.28 
-battery_max = 10000.0
-
-evasion_end_time = 0.0
-evasion_phase_1_end = 0.0
-evasion_count = 0
-last_evasion_time = 0.0
-
-print(f"[STATE CHANGE] INITIALIZING -> {current_state} (Simulatietijd: 0.00s)")
-# endregion
-
-# region Main Loop
-last_logged_percentage = 100
+roomba   = RoombaController(robot, timestep)
 
 while robot.step(timestep) != -1:
-    current_time = robot.getTime()
-    
-    battery_level = robot.batterySensorGetValue()
-    current_percentage = int((battery_level / battery_max) * 100) if battery_level >= 0 else 0
-    if current_percentage % 10 == 0 and current_percentage != last_logged_percentage and current_percentage > 0:
-        print(f"[BATTERIJ STATUS] Capaciteit gedaald naar {current_percentage}% ({battery_level:.0f}J)")
-        last_logged_percentage = current_percentage
-        
-    wall_val = wall_sensor.getValue() if wall_sensor else 0.0
-    carpet_val = carpet_sensor.getValue() if carpet_sensor else 0.0
-    ranges = lidar.getRangeImage() if lidar else []
-    bumper_hit = bumper.getValue() if bumper else 0.0
-    cliff_detected = any(s.getValue() < 150.0 for s in cliff_sensors.values() if s)
-    
-    if current_state == "ROAMING":
-        
-        # TRANSITIE: Timer (5 min) of Batterij (20%)
-        if current_time >= 300.0 or battery_level < 2000.0:
-            print(f"[STATE CHANGE] ROAMING -> RETURNING (Timer of batterijlimiet bereikt)")
-            current_state = "RETURNING"
-            continue
-            
-        is_evading = (current_time < evasion_end_time)
-        
-        # 1. UITVOERING VAN EEN NOODSTOP (De Anti-Klim uit Stap 3.4)
-        if is_evading:
-            if current_time < evasion_phase_1_end:
-                motor_left.setVelocity(-0.4 * max_speed)
-                motor_right.setVelocity(-0.4 * max_speed)
-            else:
-                motor_left.setVelocity(-0.5 * max_speed)
-                motor_right.setVelocity(0.5 * max_speed)
-            continue
-            
-        # 2. WATCHDOG: Bumper, Afgrond én Tapijt
-        # TAPIJT TOEGEVOEGD: Behandel het tapijt als een fysieke muur
-        if cliff_detected or bumper_hit > 0.0 or carpet_val > 500.0:
-            if current_time - last_evasion_time < 8.0:
-                evasion_count += 1
-            else:
-                evasion_count = 1 
-                
-            last_evasion_time = current_time
-            
-            if evasion_count >= 3:
-                print(f"[WATCHDOG] Lokaal minimum. Diepe ontsnapping gestart op {current_time:.1f}s")
-                evasion_phase_1_end = current_time + 1.2  
-                evasion_end_time = current_time + 4.0     
-                evasion_count = 0 
-            else:
-                evasion_phase_1_end = current_time + 0.5  
-                evasion_end_time = current_time + 1.4     
-            continue
-            
-        # 3. LIDAR SLALOM (De tafelpoten logica uit Stap 3.4)
-        left_obstacle = False
-        right_obstacle = False
-        
-        if ranges:
-            left_ranges = ranges[80:128]
-            right_ranges = ranges[128:176]
-            
-            valid_left = [r for r in left_ranges if r != float('inf')]
-            valid_right = [r for r in right_ranges if r != float('inf')]
-            
-            if valid_left and min(valid_left) < 0.16:
-                left_obstacle = True
-            if valid_right and min(valid_right) < 0.16:
-                right_obstacle = True
-                
-        if left_obstacle and right_obstacle:
-            motor_left.setVelocity(-0.2 * max_speed)
-            motor_right.setVelocity(0.6 * max_speed)
-            continue
-        elif left_obstacle:
-            motor_left.setVelocity(0.8 * max_speed)
-            motor_right.setVelocity(0.4 * max_speed)
-            continue
-        elif right_obstacle:
-            motor_left.setVelocity(0.4 * max_speed)
-            motor_right.setVelocity(0.8 * max_speed)
-            continue
-            
-        # 4. P-REGELAAR WANDVOLGING (De stabiele Hysteresis uit Stap 3.4)
-        base_speed = 0.6 * max_speed 
-        
-        if wall_val > 80.0:
-            setpoint = 400.0   
-            Kp = 0.0015 
-            
-            if 250.0 < wall_val < 550.0:
-                motor_left.setVelocity(base_speed)
-                motor_right.setVelocity(base_speed)
-            else:
-                error = setpoint - wall_val
-                turn = Kp * error 
-                
-                left_speed = max(min(base_speed + turn, max_speed), -max_speed)
-                right_speed = max(min(base_speed - turn, max_speed), -max_speed)
-                motor_left.setVelocity(left_speed)
-                motor_right.setVelocity(right_speed)
-        else:
-            motor_left.setVelocity(base_speed)
-            motor_right.setVelocity(base_speed)
-            
-    elif current_state == "RETURNING":
-        # Hier komt in de volgende stap de GPS-navigatie. 
-        # Momenteel stopt de robot hier netjes na 5 minuten.
-        motor_left.setVelocity(0.0)
-        motor_right.setVelocity(0.0)
-# endregion
+    roomba.run_step()

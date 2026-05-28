@@ -179,6 +179,15 @@ class RoombaController:
         self.wp_prev_dist     = float('inf')
         self.wp_progress_time = 0.0   # tijdstip van laatste betekenisvolle vooruitgang
 
+        # Persistente kaartkennis: bijgehouden gereinigde/verwerkte waypoints per fase.
+        # Overleeft laadcycli zodat de robot na het opladen VERDERGAAT i.p.v. opnieuw begint.
+        self.wp_done = {"STOFZUIGEN": set(), "DWEILEN": set()}
+
+        # Verkenningsfactor: voorzichtig starten bij een nieuwe fase, opbouwen naar vol vermogen.
+        # 0.5 = halve snelheid (verkenning), 1.0 = volledige rijsnelheid (systematisch)
+        self.exploration_factor = 1.0   # start vol bij eerste run (UNDOCKING zet dit goed)
+        self.fresh_phase        = True   # True = eerste start van een nieuwe fase
+
         # FIX-7C: Speed ramping voor vloeiender rijgedrag
         self.cleaning_speed = 0.0     # huidige gerampte rijsnelheid (rad/s)
 
@@ -217,7 +226,7 @@ class RoombaController:
 
         self._setup_devices()
         self._set_leds("UNDOCKING")
-        print(f"[SYSTEEM] Controller v5.6 gestart. State: {self.state}")
+        print(f"[SYSTEEM] Controller v5.7 gestart. State: {self.state}")
         print(f"[SYSTEEM] Batterij max: {BATTERY_MAX:.0f} J | "
               f"Terugkeerdrempel: {BATTERY_LOW_PCT*100:.0f}% | "
               f"Roaming: {ROAMING_DURATION:.0f}s per fase")
@@ -447,8 +456,10 @@ class RoombaController:
         bij TV-kast (X≈2.62) en lader (X≈2.39) door vloer-oneffenheden.
         """
         gps_on   = self._on_carpet_gps()
+        # gps_near: gebruik CARPET_Y_MIN als ondergrens om fout-positieven te vermijden
+        # wanneer robot net onder tapijt navigeert (Y≈-0.05, sensoroverlap robotstraal)
         gps_near = (-2.55 <= self.pos[0] <= 0.55 and
-                    -0.20 <= self.pos[1] <= 2.20)
+                    CARPET_Y_MIN <= self.pos[1] <= CARPET_Y_MAX + 0.25)
         trigger  = (self.carpet_val > CARPET_FULL or
                     (self.carpet_val > CARPET_EDGE and gps_near))
 
@@ -588,6 +599,7 @@ class RoombaController:
                     wx, wy = self.bous_waypoints[self.bous_wp_idx]
                     in_carpet_strip = (CARPET_Y_MIN - 0.20 <= wy <= CARPET_Y_MAX + 0.20)
                     if in_carpet_strip:
+                        self.wp_done["DWEILEN"].add(self.bous_wp_idx)
                         self.bous_wp_idx = (self.bous_wp_idx + 1) % len(self.bous_waypoints)
                         # Reset frustration bij nieuw waypoint door skip
                         self.wp_progress_time = t
@@ -617,11 +629,15 @@ class RoombaController:
                     self.wp_prev_dist     = dist_wp
                 elif (t - self.wp_progress_time) > WP_FRUSTRATION_TIME:
                     # Dichtbij maar vastgelopen: obstakel blokkeert waypoint
-                    old_wp = self.bous_wp_idx
+                    old_wp    = self.bous_wp_idx
+                    phase_key = "STOFZUIGEN" if allow_carpet else "DWEILEN"
+                    self.wp_done[phase_key].add(old_wp)
                     self.bous_wp_idx = (self.bous_wp_idx + 1) % len(self.bous_waypoints)
+                    n_done = len(self.wp_done[phase_key])
+                    n_total = len(self.bous_waypoints)
                     print(f"[NAVIGATIE] WP#{old_wp} ({wp_x:.1f},{wp_y:.1f}) "
                           f"overgeslagen na {WP_FRUSTRATION_TIME:.0f}s blokkage "
-                          f"→ WP#{self.bous_wp_idx}")
+                          f"→ WP#{self.bous_wp_idx} [{n_done}/{n_total} gedaan]")
                     self.wp_progress_time = t
                     self.wp_prev_dist     = float('inf')
                     wp_x, wp_y = self.bous_waypoints[self.bous_wp_idx]
@@ -633,8 +649,10 @@ class RoombaController:
                 self.wp_progress_time = 0.0
                 self.wp_prev_dist     = dist_wp
 
-            # ── Waypoint bereikt → volgende ───────────────────────────────
+            # ── Waypoint bereikt → markeer als gedaan, ga naar volgende ──────
             if dist_wp < BOUS_WP_RADIUS:
+                phase_key = "STOFZUIGEN" if allow_carpet else "DWEILEN"
+                self.wp_done[phase_key].add(self.bous_wp_idx)
                 self.bous_wp_idx = (self.bous_wp_idx + 1) % len(self.bous_waypoints)
                 self.wp_progress_time = t
                 self.wp_prev_dist     = float('inf')
@@ -643,7 +661,9 @@ class RoombaController:
                     next_wp = self.bous_waypoints[self.bous_wp_idx]
                     strip_n = self.bous_wp_idx // 2
                     total_s = len(self.bous_waypoints) // 2
-                    print(f"[NAVIGATIE] Strook {strip_n}/{total_s} → Y={next_wp[1]:.2f}")
+                    n_done  = len(self.wp_done[phase_key])
+                    print(f"[NAVIGATIE] Strook {strip_n}/{total_s} → Y={next_wp[1]:.2f} "
+                          f"[{n_done}/{len(self.bous_waypoints)} WP gedaan]")
                 wp_x, wp_y = self.bous_waypoints[self.bous_wp_idx]
                 dx_wp  = wp_x - self.pos[0]
                 dy_wp  = wp_y - self.pos[1]
@@ -686,9 +706,14 @@ class RoombaController:
                                -0.35 * MAX_SPEED, 0.35 * MAX_SPEED)
 
             # FIX-7C: Speed ramping — graduele versnelling/vertraging
-            # Target = volle rijsnelheid; cleaning_speed ramt er naar toe.
-            # Reset naar 0.0 na ESCAPE of UNDOCKING → vloeiende herstart.
-            target_speed = 0.55 * MAX_SPEED
+            # Exploration factor: traag opbouwen aan begin nieuwe fase (verkenning),
+            # sneller bij hervatting. Ramt exponentieel naar 1.0.
+            if self.exploration_factor < 1.0:
+                self.exploration_factor = min(
+                    1.0,
+                    self.exploration_factor + (1.0 - self.exploration_factor) * 0.025 * self.dt
+                )
+            target_speed = 0.55 * MAX_SPEED * self.exploration_factor
             ramp_delta   = SPEED_RAMP * self.dt
             self.cleaning_speed = clamp(
                 self.cleaning_speed + clamp(
@@ -767,13 +792,34 @@ class RoombaController:
                     # FIX-7A: reset frustration tracking bij nieuw reinigingsstart
                     self.wp_progress_time = 0.0
                     self.wp_prev_dist     = float('inf')
-                    # FEAT-3: begin boustrophedon bij dichtstbijzijnde waypoint
-                    min_d = float('inf')
-                    for i, (wx, wy) in enumerate(self.bous_waypoints):
-                        d = math.hypot(wx - self.pos[0], wy - self.pos[1])
-                        if d < min_d:
-                            min_d = d
-                            self.bous_wp_idx = i
+
+                    # Persistente navigatie: hervat bij eerste ONGEREINIGD waypoint.
+                    # Hierdoor begint de robot na opladen NIET opnieuw van voren,
+                    # maar gaat verder waar hij gebleven was (zoals echte Roomba).
+                    phase_done = self.wp_done[self.mission_phase]
+                    n_wps      = len(self.bous_waypoints)
+                    found_next = False
+                    for i in range(n_wps):
+                        idx = (self.bous_wp_idx + i) % n_wps
+                        if idx not in phase_done:
+                            self.bous_wp_idx = idx
+                            found_next = True
+                            break
+                    if not found_next:
+                        # Alle waypoints reeds gedaan (kan voorkomen bij reset)
+                        self.bous_wp_idx = 0
+
+                    # Verkenningsfactor: voorzichtiger bij nieuwe fase, vertrouwd bij hervatting
+                    if self.fresh_phase:
+                        self.exploration_factor = 0.50   # nieuwe fase: langzame start
+                    else:
+                        self.exploration_factor = 0.85   # hervatting: redelijk vertrouwen
+                    self.fresh_phase = False
+
+                    print(f"[NAVIGATIE] Hervatting {self.mission_phase}: "
+                          f"{len(phase_done)}/{n_wps} WP gedaan, "
+                          f"begin bij WP#{self.bous_wp_idx}, "
+                          f"exploration={self.exploration_factor:.2f}")
                     self.state = self.mission_phase
                     self._set_leds(self.mission_phase)
                     print(f"[STATE CHANGE] UNDOCKING → {self.mission_phase} "
@@ -1011,16 +1057,33 @@ class RoombaController:
             pct = int((self.battery / BATTERY_MAX) * 100) if self.battery >= 0 else 0
 
             def _start_next_phase():
-                """Wissel mission_phase en start UNDOCKING."""
-                # FEAT-1: toggle na elke volledige laadcyclus
-                old_phase = self.mission_phase
-                self.mission_phase = ("DWEILEN" if old_phase == "STOFZUIGEN"
-                                      else "STOFZUIGEN")
-                t_now = self.robot.getTime()
-                dur   = t_now - self.last_charge_time if self.last_charge_time else 0
-                print(f"[STATE CHANGE] CHARGING → UNDOCKING "
-                      f"(batterij {pct}%, laadduur: {dur:.0f}s)")
-                print(f"[MISSIE] {old_phase} klaar → volgende fase: {self.mission_phase}")
+                """Start UNDOCKING. Wissel fase alleen als alle waypoints verwerkt zijn."""
+                n_total    = len(self.bous_waypoints)
+                phase_key  = self.mission_phase
+                n_done     = len(self.wp_done[phase_key])
+                t_now      = self.robot.getTime()
+                dur        = t_now - self.last_charge_time if self.last_charge_time else 0
+
+                if n_done >= n_total:
+                    # Fase volledig afgerond → wissel naar andere fase
+                    old_phase          = self.mission_phase
+                    self.mission_phase = ("DWEILEN" if old_phase == "STOFZUIGEN"
+                                          else "STOFZUIGEN")
+                    self.wp_done[self.mission_phase].clear()   # schoon begin nieuwe fase
+                    self.fresh_phase   = True
+                    print(f"[STATE CHANGE] CHARGING → UNDOCKING "
+                          f"(batterij {pct}%, laadduur: {dur:.0f}s)")
+                    print(f"[MISSIE] {old_phase} volledig gereinigd "
+                          f"({n_done}/{n_total} WP) → nieuwe fase: {self.mission_phase}")
+                else:
+                    # Fase nog niet klaar → zelfde fase hervatten
+                    remaining = n_total - n_done
+                    self.fresh_phase = False
+                    print(f"[STATE CHANGE] CHARGING → UNDOCKING "
+                          f"(batterij {pct}%, laadduur: {dur:.0f}s)")
+                    print(f"[MISSIE] {phase_key} hervat: "
+                          f"{n_done}/{n_total} WP gedaan, {remaining} resterend")
+
                 self.last_charge_time    = t_now
                 self.charging_start_time = 0.0
                 self.state               = "UNDOCKING"

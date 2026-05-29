@@ -24,6 +24,7 @@
 12. [Veiligheids- en bewakingsfuncties](#12-veiligheids--en-bewakingsfuncties)
 13. [Softwarestructuur](#13-softwarestructuur)
 14. [Diagrammen](#14-diagrammen)
+15. [Handleiding](#15-handleiding)
 
 ---
 
@@ -42,10 +43,6 @@
 | Productpagina | https://www.irobot.be/nl_BE/roomba-205-dustcompactor-combo/L121240.html    |
 
 De Roomba® 205 is een autonoom reinigingstoestel dat dankzij ClearView™ LiDAR-technologie een ruimte systematisch in rechte banen afdekt, in tegenstelling tot oudere modellen die willekeurig rondreden. Het toestel wisselt zelfstandig van reinigingsmodus (stofzuigen of dweilen) en keert terug naar het thuisstation voor het opladen.
-
-### 1.2 Design objective
-
-In het kader van de design project Robot Design wordt een **digitale twin** van de Roomba® 205 ontwikkeld in Webots R2025a. De twin gedraagt zich gedragsmatig gelijkaardig aan het werkelijke toestel: systematische baannavigatie, tapijtvermijding tijdens dweilen, automatisch opladen en modus­afwisseling. De softwarecontroller is geschreven in Python.
 
 ---
 
@@ -135,7 +132,7 @@ De sensorwaarde wordt gebruikt voor een proportionele correctieterm (P-correctie
 | Positionering          | Vooraan op de robot, gecentreerd, omlaag gericht                        |
 | Afstand tot middelpunt | 16 cm naar voren                                                        |
 | Meetbereik             | 0 – 0,1 m (lookupTable: 0 m → 1000, 0,1 m → 0)                          |
-| Drempelwaarden         | CARPET_FULL > 730 — volledig op tapijt; CARPET_EDGE > 670 — tapijt­rand |
+| Drempelwaarden         | CARPET_FULL > 730 — volledig op tapijt, CARPET_EDGE > 670 — tapijt­rand |
 
 De tapijtsensor onderscheidt vloer van tapijt op basis van reflectiewaarden. Tijdens **STOFZUIGEN** worden positieve metingen (> CARPET_FULL) gebruikt om een persistente tapijt­gridkaart op te bouwen. Tijdens **DWEILEN** triggert een positieve meting de tapijtvermijdings­routine.
 
@@ -173,7 +170,7 @@ bearing = atan2(compass[1], compass[0])  [radialen → graden]
 0° = Noord (+Y), 90° = Oost (+X)
 ```
 
-Het kompas wordt gebruikt bij de PID-koersregeling (ALIGNING), bij de UNDOCKING-draaibeweging en bij de koersberekening naar waypoints.
+Het kompas wordt gebruikt bij de koersregeling in ALIGNING, bij de UNDOCKING-draaibeweging en bij de koersberekening naar waypoints.
 
 ---
 
@@ -218,13 +215,13 @@ De controller implementeert een **acht-toestandsmachine**. Elke state heeft een 
 | State      | Beschrijving                                                                |
 | ---------- | --------------------------------------------------------------------------- |
 | UNDOCKING  | Robot rijdt achteruit weg van laadstation en draait naar reinigingsrichting |
-| STOFZUIGEN | Systematisch stofzuigen via boustrophedon-navigatie; tapijt toegestaan      |
-| DWEILEN    | Systematisch dweilen via boustrophedon-navigatie; tapijt verboden           |
+| STOFZUIGEN | Systematisch stofzuigen via boustrophedon-navigatie, tapijt toegestaan      |
+| DWEILEN    | Systematisch dweilen via boustrophedon-navigatie, tapijt verboden           |
 | ESCAPE     | Noodmanoeuvre na bumper­hit of afgronddetectie                              |
 | RETURNING  | GPS-gestuurde terugkeer naar de pre-dock positie                            |
-| ALIGNING   | PID-gestuurde uitlijning op 0° (Noord) voor het docken                      |
+| ALIGNING   | P-gestuurde uitlijning op 0° (Noord) voor het docken (gain = 0,06)          |
 | DOCKING    | Langzaam insturen van het laadstation op basis van GPS X-correctie          |
-| CHARGING   | Stilstaand opladen; fasewisseling bij volledig opgeladen batterij           |
+| CHARGING   | Stilstaand opladen, fasewisseling bij volledig opgeladen batterij           |
 
 ### 5.2 Transitieoverzicht
 
@@ -236,14 +233,14 @@ De controller implementeert een **acht-toestandsmachine**. Elke state heeft een 
 
 **STOFZUIGEN / DWEILEN:**
 
-- → RETURNING als batterij ≤ 20% of tijdslimiet (5 min) overschreden
+- → RETURNING als batterij ≤ 20% of tijdslimiet (20 min) overschreden
 - → RETURNING als alle waypoints van de huidige fase verwerkt zijn
 - → ESCAPE bij bumper­hit of afgronddetectie
 
 **ESCAPE:**
 
 - Fase 1: achteruit rijden (~1 s)
-- Fase 2: draaien (willekeurige richting, 0,8 – 1,6 s; bij hoeksituatie 180°)
+- Fase 2: draaien (willekeurige richting, 0,8 – 1,6 s, bij hoeksituatie 180°)
 - → Terug naar vorige state (STOFZUIGEN, DWEILEN of RETURNING)
 
 **RETURNING:**
@@ -254,7 +251,7 @@ De controller implementeert een **acht-toestandsmachine**. Elke state heeft een 
 
 **ALIGNING:**
 
-- PID-sturing naar kompas­bearing 0° (Noord)
+- P-sturing naar kompas­bearing 0° (Noord): `turn_sp = clamp(0,06 × |err|, 2%·MAX, 18%·MAX)`
 - → DOCKING als |afwijking| < 6° of na time-out van 10 s
 
 **DOCKING:**
@@ -318,7 +315,7 @@ Vlak voor een waypoint (< 0,55 m) mengt de controller de stuursignalen met de ri
 Bij terugkeer naar het laadstation navigeert de robot in twee fasen:
 
 1. **RETURNING:** GPS-sturing naar pre-dock punt (X = 2,00, Y = 1,80). Bij een startpositie zuidelijk in de kamer (Y < 0,30) wordt een tussentijds via-punt (X = 0,50, Y = 0,50) ingezet om te vermijden dat de robot recht door de tafelzone rijdt.
-2. **ALIGNING + DOCKING:** PID-uitlijning op Noord (0°), gevolgd door langzaam insturen met GPS X-correctie.
+2. **ALIGNING + DOCKING:** P-uitlijning op Noord (0°), gevolgd door langzaam insturen met GPS X-correctie.
 
 ---
 
@@ -389,20 +386,26 @@ D   = Kd × (ER − prev_ER) / Δt        (differentiërend)
 LMN = clamp(P + I + D, LMN_LLM, LMN_HLM)
 ```
 
-### 9.2 Toepassing in de controller
+### 9.2 Aanwezigheid in de controller
 
-De PID-regelaar wordt gebruikt voor **koersregeling in de ALIGNING-state**:
+Een `PID_Controller`-object (`pid_bearing`) wordt aangemaakt met de volgende parameters en gereset bij elke toestandsovergang naar ALIGNING:
 
-| Parameter | Waarde            | Betekenis                                     |
-| --------- | ----------------- | --------------------------------------------- |
-| Kp        | 0,045             | Proportionele gain (koersfout → sturing)      |
-| Ki        | 0,0               | Integrerende gain (uitgeschakeld)             |
-| Kd        | 0,001             | Differentiërende gain (demping bij overshoot) |
-| SP        | 0,0°              | Gewenste koers: Noord (0°)                    |
-| LMN_HLM   | +0,45 × MAX_SPEED | Maximale rechtse sturing                      |
-| LMN_LLM   | −0,45 × MAX_SPEED | Maximale linkse sturing                       |
+| Parameter | Waarde            | Betekenis                         |
+| --------- | ----------------- | --------------------------------- |
+| Kp        | 0,045             | Proportionele gain                |
+| Ki        | 0,0               | Integrerende gain (uitgeschakeld) |
+| Kd        | 0,001             | Differentiërende gain             |
+| SP        | 0,0°              | Gewenste koers: Noord (0°)        |
+| LMN_HLM   | +0,45 × MAX_SPEED | Maximale rechtse sturing          |
+| LMN_LLM   | −0,45 × MAX_SPEED | Maximale linkse sturing           |
 
-De PV (gemeten koers) komt van het kompas. De LMN-uitgang wordt omgezet naar een verschil in wielsnelheden: `left = LMN, right = −LMN` (in-place draaien).
+De actieve koersregeling in de ALIGNING-state maakt gebruik van een eenvoudige P-sturing:
+
+```python
+turn_sp = clamp(0.06 * abs(err), 0.02 * MAX_SPEED, 0.18 * MAX_SPEED)
+```
+
+De stuursignalen worden omgezet naar wielsnelheden via `left = ±turn_sp, right = ∓turn_sp` (in-place draaien, richting afhankelijk van het tekenen van de koersfout).
 
 ---
 
@@ -488,13 +491,15 @@ Hoe langer de robot al bezig is om het pre-dock punt te bereiken, hoe soepeler d
 project/
 ├── controllers/
 │   └── roomba_controller/
-│       └── roomba_controller.py    ← Hoofdcontroller (v5.12)
+│       └── roomba_controller.py
 ├── worlds/
-│   └── project.wbt                 ← Webots wereld
+│   └── project.wbt                      ← Webots wereld
 ├── docs/
-│   └── technisch_constructiedossier.md   ← Dit document
-├── theorie_robotics/               ← Design references
-└── logs/                           ← Simulatielogs per versie
+│   ├── technisch_constructiedossier.md  ← Dit document
+│   ├── Roomba_205_DustCompactor_Combo_Robot.pdf  ← Gebruikshandleiding
+│   └── diagrams/
+│       ├── draw.io/                     ← Bewerkbare bronbestanden (.drawio)
+│       └── images/                      ← Geëxporteerde afbeeldingen (.jpg)
 ```
 
 ### 13.2 Klasse-overzicht
@@ -537,38 +542,40 @@ RoombaController        — Hoofdcontroller
 
 ## 14. Diagrammen
 
-De diagrammen worden opgesteld in **draw.io** en opgeslagen in `.drawio`-formaat. Ze worden geplaatst in de map `Softwareontwerpen/`.
+De diagrammen zijn opgesteld in **draw.io**. De bronbestanden (`.drawio`) staan in `docs/diagrams/draw.io/`. Hieronder worden de exporteerde afbeeldingen weergegeven met een beknopte toelichting.
 
-### 14.1 Hoofd­state diagram
+### 14.1 Missiecyclus — flowchart
 
-**Doel:** volledig overzicht van alle acht states en alle overgangsvoorwaarden.
+![Missiecyclus](./diagrams/images/missiecyclus.jpg)
 
-**Te verwerken inhoud:**
+Hoog­niveau overzicht van de volledige missie­cyclus. De robot start met UNDOCKING, voert vervolgens STOFZUIGEN of DWEILEN uit en keert terug naar het laadstation (RETURNING → ALIGNING → DOCKING → CHARGING). Na het opladen wisselt de robot van fase als die volledig gereinigd was, anders hervat hij dezelfde fase. De cyclus herhaalt zich totdat beide fases afgerond zijn.
 
-Elke state wordt weergegeven als een UML-state met interne activiteiten (wat doet de robot in deze state). De overgangen bevatten de exacte conditie. De startstate is UNDOCKING (beginstate na opstart). Speciale aandacht voor:
+### 14.2 State diagram
 
-- De bidirectionele koppeling CHARGING → UNDOCKING → STOFZUIGEN/DWEILEN
-- De ESCAPE-terugkeer naar de vorige state (prev_state)
-- De twee ALIGNING → DOCKING → CHARGING-kettingen
+![State diagram](./diagrams/images/diagram.jpg)
 
-### 14.2 Activiteitsdiagram — reinigingslus
+Volledig overzicht van alle acht states en hun overgangsvoorwaarden. Elke pijl bevat de exacte trigger­conditie. Te letten op de ESCAPE-state die terugkeert naar de vorige state (`prev_state`), en de volledige docking­ketting RETURNING → ALIGNING → DOCKING → CHARGING → UNDOCKING.
 
-**Doel:** de vijf navigatieprioriteiten binnen `_execute_cleaning()` visualiseren als beslissings­boom.
+### 14.3 Activiteitsdiagram — reinigingslus
 
-**Te verwerken inhoud:**
+![Reinigingslus](./diagrams/images/reinigingslus.jpg)
 
-Start → Priority 0 (fase volledig?) → Priority 1 (batterij/tijd?) → Priority 2 (tapijt? — alleen DWEILEN) → Priority 3 (LiDAR obstakel?) → Priority 4 (waypoint navigatie) → einde cyclus.
+Detailweergave van de vijf gelaagde navigatieprioriteiten die elke tijdstap doorlopen worden in `_execute_cleaning()`. Hogere prioriteit wint altijd: fase­check (P0) → batterij/tijd (P1) → tapijtvermijding (P2, alleen DWEILEN) → LiDAR-obstakel (P3) → boustrophedon GPS-navigatie (P4). Dit garandeert dat veiligheid en terugkeer altijd voorgaan op routinenavigatie.
 
-Elk beslissings­punt is een ruit. De acties (motoraansturing) zijn rechthoeken. Dit diagram maakt de gelaagde reactieve architectuur inzichtelijk.
+### 14.4 Activiteitsdiagram — dockingsequentie
 
-### 14.3 Activiteitsdiagram — docking­sequentie (optioneel)
+![Dockingsequentie](./diagrams/images/docking.jpg)
 
-**Doel:** de gedetailleerde docking­procedure verduidelijken.
+Gedetailleerde weergave van het vierfasig dockingproces: RETURNING (GPS-navigatie naar pre-dock punt, met optioneel via-punt om de tafelzone te omzeilen) → ALIGNING (P-koersregeling op 0°) → DOCKING (langzaam vooruit met GPS X-correctie, meerdere uitgangs­condities) → CHARGING (opladen, conditionele fasewisseling). Terugvalpaden bij stall of timeout zijn eveneens weergegeven.
 
-**Te verwerken inhoud:**
+---
 
-RETURNING (GPS-navigatie, via-punt?) → ALIGNING (PID, drempel 6°?) → DOCKING (bumper/GPS/stall?) → CHARGING. Inclusief terugval­paden (stall → ALIGNING, timeout → ALIGNING).
+## 15. Handleiding
 
-Dit diagram is zinvol omdat de docking­logica meerdere parallelle condities heeft (bumper, GPS, stall, timeout) die samen beslissen wanneer CHARGING geactiveerd wordt.
+De officiële gebruikers­handleiding van de iRobot Roomba® 205 DustCompactor™ Combo is opgenomen als bijlage bij dit dossier. De handleiding beschrijft de bediening van het werkelijke toestel, de veiligheidsinstructies, het onderhoud en de technische specificaties zoals opgegeven door de fabrikant.
+
+📄 **[Roomba® 205 DustCompactor™ Combo — Gebruikshandleiding (PDF)](./Roomba_205_DustCompactor_Combo_Robot.pdf)**
+
+De handleiding dient als referentie voor de gedragsspecificaties die de digitale twin nabootst: de automatische terugkeer naar het laadstation, de modus­afwisseling en de systematische baannavigatie via ClearView™ LiDAR.
 
 ---

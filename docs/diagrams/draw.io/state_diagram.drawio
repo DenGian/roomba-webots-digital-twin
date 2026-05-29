@@ -1,0 +1,169 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.0.3 Chrome/140.0.7339.249 Electron/38.7.0 Safari/537.36" version="29.0.3">
+  <diagram id="pHCA8OyKyr_fRwMTGwmh" name="Page-1">
+    <mxGraphModel dx="1955" dy="1677" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="State Diagram" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=15;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="82" y="-37" width="650" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="n0" value="" style="ellipse;fillColor=#000000;strokeColor=#000000;" parent="1" vertex="1">
+          <mxGeometry x="396" y="15" width="22" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="n1" value="UNDOCKING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="311" y="62" width="192" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="n2" value="STOFZUIGEN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="65" y="198" width="192" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="n3" value="DWEILEN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="558" y="198" width="192" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="n4" value="ESCAPE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="770" y="358" width="192" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="n5" value="RETURNING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="311" y="358" width="192" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="n6" value="ALIGNING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="311" y="478" width="192" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="n7" value="DOCKING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="311" y="598" width="192" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="n8" value="CHARGING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="311" y="718" width="192" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e01" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" parent="1" source="n0" target="n1" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1a" value="mission_phase = STOFZUIGEN&#xa;[koers ≈ 180° bereikt]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;" parent="1" source="n1" target="n2" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="130" y="70" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e1b" value="mission_phase = DWEILEN&#xa;[koers ≈ 180° bereikt]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;" parent="1" source="n1" target="n3" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e25" value="batterij ≤ 20% OF tijdslimiet&#xa;(20 min) OF alle WPs verwerkt" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;exitX=0.5;exitY=1;exitPerimeter=0;entryX=0;entryY=0.5;entryPerimeter=0;" parent="1" source="n2" target="n5" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="160" y="253" />
+              <mxPoint x="160" y="386" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e35" value="batterij ≤ 20% OF tijdslimiet&#xa;(20 min) OF alle WPs verwerkt" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" parent="1" target="n5" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="600" y="350" />
+              <mxPoint x="520" y="350" />
+              <mxPoint x="520" y="372" />
+            </Array>
+            <mxPoint x="600" y="253" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e2e" value="bumper OF afgrond" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=0.75;exitY=1;exitDx=0;exitDy=0;" parent="1" source="n2" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="210" y="253" />
+              <mxPoint x="210" y="322" />
+              <mxPoint x="800" y="322" />
+              <mxPoint x="800" y="358" />
+            </Array>
+            <mxPoint x="800" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3e" value="bumper OF afgrond" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=0.5;exitY=1;exitPerimeter=0;entryX=0.5;entryY=0;entryPerimeter=0;" parent="1" source="n3" target="n4" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="654" y="300" />
+              <mxPoint x="866" y="300" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5e" value="bumper OF afgrond" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;" parent="1" source="n5" target="n4" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="620" y="390" />
+              <mxPoint x="620" y="390" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ee2" value="manoeuvre klaar&#xa;[prev_state = STOFZUIGEN]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;entryX=0.5;entryY=0;entryPerimeter=0;" parent="1" target="n2" edge="1">
+          <mxGeometry x="0.2634" relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="920" y="358" />
+              <mxPoint x="920" y="162" />
+              <mxPoint x="161" y="162" />
+            </Array>
+            <mxPoint x="920" y="358" as="sourcePoint" />
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ee3" value="manoeuvre klaar&#xa;[prev_state = DWEILEN]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;exitX=1;exitY=0.5;exitPerimeter=0;entryX=1;entryY=0.5;entryPerimeter=0;" parent="1" source="n4" target="n3" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1040" y="386" />
+              <mxPoint x="1040" y="226" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ee5" value="manoeuvre klaar&#xa;[prev_state = RETURNING]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;" parent="1" source="n4" target="n5" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="866" y="430" />
+              <mxPoint x="460" y="430" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e56" value="pre-dock bereikt (X≈2,0; Y≈1,8)" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="1" source="n5" target="n6" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e67" value="koersfout &lt; 6° OF timeout 10 s" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="1" source="n6" target="n7" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e78" value="bumper in dock OF GPS Y &gt; 2,70 m&#xa;OF stall in dock-radius" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;" parent="1" source="n7" target="n8" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e76" value="stall buiten radius&#xa;OF timeout 45 s" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;exitX=1;exitY=0.5;exitPerimeter=0;entryX=1;entryY=0.5;entryPerimeter=0;" parent="1" source="n7" target="n6" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="564" y="625" />
+              <mxPoint x="564" y="505" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e81" value="batterij ≥ 95% OF timeout 90 s&#xa;→ fasewisseling" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;exitX=0;exitY=0.5;exitPerimeter=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" parent="1" source="n8" target="n1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="40" y="746" />
+              <mxPoint x="40" y="20" />
+              <mxPoint x="359" y="20" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="leg_title" value="Legenda" style="text;html=1;strokeColor=none;fillColor=none;fontStyle=1;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="807" y="521" width="80" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1" value="Initialisatie" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;" parent="1" vertex="1">
+          <mxGeometry x="807" y="546" width="110" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2" value="Reinigingsmodi" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" parent="1" vertex="1">
+          <mxGeometry x="807" y="581" width="110" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3" value="Noodmanoeuvre" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;" parent="1" vertex="1">
+          <mxGeometry x="807" y="616" width="110" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4" value="Navigatie/Docken" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="1" vertex="1">
+          <mxGeometry x="807" y="651" width="110" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5" value="Opladen" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=9;" parent="1" vertex="1">
+          <mxGeometry x="807" y="686" width="110" height="28" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

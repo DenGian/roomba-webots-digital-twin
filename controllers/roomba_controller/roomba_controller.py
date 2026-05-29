@@ -68,7 +68,7 @@ def angle_error(target, current):
 MAX_SPEED        = 6.28
 BATTERY_MAX      = 10_000.0
 BATTERY_LOW_PCT  = 0.20          # terugkeerdrempel: 20% resterend
-ROAMING_DURATION = 1200.0         # 5 minuten per reinigingsfase (veiligheidsback-up)
+ROAMING_DURATION = 1200.0         # 20 minuten per reinigingsfase (veiligheidsback-up)
 
 # Lidar sectoren (256 rays, 180° FOV; index 0=LINKS, 128=VOOR, 255=RECHTS)
 _L0,  _L1  =   0,  64
@@ -112,10 +112,10 @@ CHARGING_MAX_TIME  = 90.0
 # Bronvermelding: irobot.com — "navigeert met ClearView™ LiDAR, wand-tot-wand"
 BOUS_Y_MIN      = -2.10   # FIX-v5.11: was -2.40 → 30cm wand-marge (minder zuidwand-hits)
 BOUS_Y_MAX      =  1.80   # FIX-v5.10: was 2.20 → vermijdt area nabij lader-arm
-BOUS_X_MIN      = -2.20   # FIX-v5.11: was -2.40 → 20cm wand-marge (minder westwand-hits)
-BOUS_X_MAX      =  2.20   # FIX-v5.11: was  2.40 → 20cm wand-marge (minder oostwand-hits)
+BOUS_X_MIN      = -2.35   # FIX-v5.12: dichter bij wanden voor betere wand-tot-wand dekking
+BOUS_X_MAX      =  2.35   # FIX-v5.12: dichter bij wanden voor betere wand-tot-wand dekking
 BOUS_STRIP_STEP =  0.35
-BOUS_WP_RADIUS  =  0.28   # FIX-v5.11: 0.22 → 0.28m (hoek-WPs eerder bereikt, minder vastlopen)
+BOUS_WP_RADIUS  =  0.22   # FIX-v5.12: terug naar 0.22m (robot keert dichter bij wand)
 
 # FIX-7A: Dynamische obstakeldetectie via frustration timeout
 # Vervangt alle hardcoded meubelconstanten (TABLE_*, SOFA_*).
@@ -254,7 +254,7 @@ class RoombaController:
 
         self._setup_devices()
         self._set_leds("UNDOCKING")
-        print(f"[SYSTEEM] Controller v5.11 gestart. State: {self.state}")
+        print(f"[SYSTEEM] Controller v5.12 gestart. State: {self.state}")
         print(f"[SYSTEEM] Batterij max: {BATTERY_MAX:.0f} J | "
               f"Terugkeerdrempel: {BATTERY_LOW_PCT*100:.0f}% | "
               f"Roaming: {ROAMING_DURATION:.0f}s per fase")
@@ -367,6 +367,67 @@ class RoombaController:
         return self._generate_boustrophedon(
             BOUS_X_MIN, BOUS_X_MAX, BOUS_Y_MIN, BOUS_Y_MAX
         )
+
+    def _generate_dweilen_waypoints(self):
+        """
+        Genereer DWEILEN-specifieke waypoints die het tapijt vermijden.
+
+        Strategie:
+          • Stroken BUITEN de tapijt-Y-zone (Y < carpet_y_min - buffer):
+            volledige breedte BOUS_X_MIN → BOUS_X_MAX (robot kan vrij).
+          • Stroken IN de tapijt-Y-zone (carpet_y_min - buffer ≤ Y ≤ carpet_y_max + buffer):
+            alleen het OOST-deel: carpet_x_east → BOUS_X_MAX.
+            Zo wordt de vloer OOST van het tapijt toch gemopped zonder het tapijt te betreden.
+
+        FIX-v5.12: Vervangt de Y-only WP-skip in _execute_cleaning (v5.11).
+        De v5.11-aanpak sloeg ALLE WPs in de tapijt-Y-band over — ook die op
+        X=2.20 (oost van tapijt) — waardoor de vloer rechts van het tapijt nooit
+        gedweild werd. Door separate WPs te genereren met beperkte X-reeks wordt
+        die zone wél bereikt terwijl het tapijt zelf nooit betreden wordt.
+
+        Fallback als carpet_map nog leeg is: gebruik de hardcoded CARPET_*-grenzen.
+        """
+        cy_min = self._min_carpet_y()
+        cy_max = self._max_carpet_y()
+        cx_east = self._carpet_x_east()
+        buffer = 0.20
+
+        cy_lo = cy_min - buffer   # onderste Y-grens tapijt-zone (met buffer)
+        cy_hi = cy_max + buffer   # bovenste Y-grens tapijt-zone (met buffer)
+
+        pts = []
+        y = BOUS_Y_MIN
+        going_east = True
+
+        while y <= BOUS_Y_MAX + 0.01:
+            yr = round(y, 2)
+
+            # Lader-hoekuitsluiting: zelfde als in _generate_boustrophedon
+            if yr > CHARGER_Y - 0.80:
+                x_east = min(BOUS_X_MAX, CHARGER_X - 0.50)
+            else:
+                x_east = BOUS_X_MAX
+
+            # Bepaal westgrens: in tapijt-Y-zone → alleen oost-deel, anders vol breedte
+            in_carpet_zone = cy_lo <= yr <= cy_hi
+            x_west = cx_east if in_carpet_zone else BOUS_X_MIN
+
+            if going_east:
+                pts.append((x_west, yr))
+                pts.append((x_east, yr))
+            else:
+                pts.append((x_east, yr))
+                pts.append((x_west, yr))
+
+            y += BOUS_STRIP_STEP
+            going_east = not going_east
+
+        n_full = sum(1 for (_, yy) in pts[::2] if not (cy_lo <= yy <= cy_hi))
+        n_east = sum(1 for (_, yy) in pts[::2] if (cy_lo <= yy <= cy_hi))
+        print(f"[DWEILEN-WP] {len(pts)} waypoints gegenereerd: "
+              f"{n_full} volbreedte-stroken, {n_east} oost-stroken "
+              f"(X≥{cx_east:.2f}m, tapijt-Y-zone {cy_lo:.2f}..{cy_hi:.2f})")
+        return pts
 
     def _generate_boustrophedon(self, x_min, x_max, y_min, y_max):
         """
@@ -606,6 +667,17 @@ class RoombaController:
             return CARPET_Y_MAX
         return max(cy * CARPET_CELL_SIZE for (_, cy) in self.carpet_map)
 
+    def _carpet_x_east(self):
+        """
+        Veilige start-X voor oost-enkel DWEILEN-stroken.
+        = bovengrens van meest oostelijke tapijt-gridcel + 0.20m veiligheidsbuffer.
+        Fallback als carpet_map leeg is: CARPET_X_MAX + 0.30m.
+        """
+        if not self.carpet_map:
+            return CARPET_X_MAX + 0.30          # = 0.60m als fallback
+        max_cx = max(cx for (cx, _) in self.carpet_map)
+        return (max_cx + 1) * CARPET_CELL_SIZE + 0.20  # bovengrens cel + buffer
+
     def _handle_carpet_escape(self, t):
         """
         Sensor-gestuurde tapijtvermijding voor DWEILEN.
@@ -793,25 +865,15 @@ class RoombaController:
             # ── Prioriteit 4: Boustrophedon GPS-navigatie ─────────────────
             # "Cleans in neat rows, wall-to-wall" — irobot.com / ClearView™ LiDAR
             # Geen hardcoded meubelzones; dynamisch via LiDAR + frustration timeout.
-
-            # DWEILEN: sla waypoints over die in of te dicht bij een gekarteeerde tapijt-cel
-            # liggen. Sensor-gebaseerde carpet_map vervangt de hardcoded Y-grens:
-            # elk waypoint binnen 0.40m van een tapijt-cel (gemeten in gridcel-afstand)
-            # wordt overgeslagen. Fallback naar hardcoded Y-grens als kaart nog leeg is.
-            if not allow_carpet:
-                skips = 0
-                while skips < len(self.bous_waypoints):
-                    wx, wy = self.bous_waypoints[self.bous_wp_idx]
-                    in_carpet_strip = self._wp_in_carpet_zone(wx, wy, buffer=0.20)
-                    if in_carpet_strip:
-                        self.wp_done["DWEILEN"].add(self.bous_wp_idx)
-                        self.bous_wp_idx = (self.bous_wp_idx + 1) % len(self.bous_waypoints)
-                        # Reset frustration bij nieuw waypoint door skip
-                        self.wp_progress_time = t
-                        self.wp_prev_dist     = float('inf')
-                        skips += 1
-                    else:
-                        break
+            #
+            # FIX-v5.12: DWEILEN-WP-skip lus VERWIJDERD.
+            # De v5.11-lus sloeg alle WPs in de tapijt-Y-band over (Y≈0.05..1.95),
+            # ook die op X=2.20m (oost van tapijt), waardoor de vloer rechts van
+            # het tapijt nooit gedweild werd.
+            # v5.12 genereert aparte DWEILEN-waypoints via _generate_dweilen_waypoints():
+            # stroken in de tapijt-Y-zone starten pas aan carpet_x_east (≈0.60m)
+            # in plaats van BOUS_X_MIN (-2.35m). Zo wordt de oost-zone wél gemopped
+            # zonder het tapijt zelf te betreden. Geen runtime skip-lus meer nodig.
 
             wp_x, wp_y = self.bous_waypoints[self.bous_wp_idx]
             dx_wp  = wp_x - self.pos[0]
@@ -1302,12 +1364,23 @@ class RoombaController:
                                           else "STOFZUIGEN")
                     self.wp_done[self.mission_phase].clear()   # schoon begin nieuwe fase
                     self.fresh_phase   = True
+                    self.bous_wp_idx   = 0                      # FIX-v5.12: altijd hervatten van 0 bij nieuwe fase
+
+                    # FIX-v5.12: Genereer fase-specifieke waypoints bij fasewisseling.
+                    # DWEILEN: oost-enkel stroken in tapijt-Y-zone (tapijt vermijden).
+                    # STOFZUIGEN: volledige breedte (standaard boustrophedon).
+                    if self.mission_phase == "DWEILEN":
+                        self.bous_waypoints = self._generate_dweilen_waypoints()
+                    else:
+                        self.bous_waypoints = self._generate_waypoints()
+
                     print(f"[STATE CHANGE] CHARGING → UNDOCKING "
                           f"(batterij {pct}%, laadduur: {dur:.0f}s)")
                     print(f"[MISSIE] {old_phase} volledig gereinigd "
-                          f"({n_done}/{n_total} WP) → nieuwe fase: {self.mission_phase}")
+                          f"({n_done}/{n_total} WP) → nieuwe fase: {self.mission_phase} "
+                          f"({len(self.bous_waypoints)} WP)")
                 else:
-                    # Fase nog niet klaar → zelfde fase hervatten
+                    # Fase nog niet klaar → zelfde fase hervatten (waypoints ongewijzigd)
                     remaining = n_total - n_done
                     self.fresh_phase = False
                     print(f"[STATE CHANGE] CHARGING → UNDOCKING "

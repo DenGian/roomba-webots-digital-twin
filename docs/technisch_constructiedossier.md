@@ -53,7 +53,7 @@ In het kader van de design project Robot Design wordt een **digitale twin** van 
 
 ### 2.1 Wereld
 
-De simulatie speelt zich af in een gesloten kamer van approximately 5,9 × 5,9 m met vier muren. De kamer bevat een aantal obstakels (meubels: sofa, tafel) die de robot reactief moet omzeilen. In de noordoostelijke hoek bevindt zich het laadstation.
+De simulatie speelt zich af in een gesloten kamer van ongeveer 5,9 × 5,9 m met vier muren. De kamer bevat een aantal obstakels (meubels: sofa, tafel) die de robot reactief moet omzeilen. In de noordoostelijke hoek bevindt zich het laadstation.
 
 | Element              | Positie (wereldcoördinaten) | Afmetingen            |
 | -------------------- | --------------------------- | --------------------- |
@@ -537,7 +537,7 @@ RoombaController        — Hoofdcontroller
 
 ## 14. Diagrammen
 
-De diagrammen worden opgesteld in **draw.io** en opgeslagen in `.drawio`-formaat, conform de system requirements. Ze worden geplaatst in de map `Softwareontwerpen/`.
+De diagrammen worden opgesteld in **draw.io** en opgeslagen in `.drawio`-formaat. Ze worden geplaatst in de map `Softwareontwerpen/`.
 
 ### 14.1 Hoofd­state diagram
 
@@ -572,5 +572,3 @@ RETURNING (GPS-navigatie, via-punt?) → ALIGNING (PID, drempel 6°?) → DOCKIN
 Dit diagram is zinvol omdat de docking­logica meerdere parallelle condities heeft (bumper, GPS, stall, timeout) die samen beslissen wanneer CHARGING geactiveerd wordt.
 
 ---
-
-_Einde Technisch Constructiedossier — versie v5.12_

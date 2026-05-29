@@ -110,17 +110,17 @@ CHARGING_MAX_TIME  = 90.0
 
 # Boustrophedon navigatie (ClearView™ LiDAR stijl — "schoon in rechte banen")
 # Bronvermelding: irobot.com — "navigeert met ClearView™ LiDAR, wand-tot-wand"
-BOUS_Y_MIN      = -2.40
-BOUS_Y_MAX      =  2.20
-BOUS_X_MIN      = -2.40
-BOUS_X_MAX      =  2.40
+BOUS_Y_MIN      = -2.10   # FIX-v5.11: was -2.40 → 30cm wand-marge (minder zuidwand-hits)
+BOUS_Y_MAX      =  1.80   # FIX-v5.10: was 2.20 → vermijdt area nabij lader-arm
+BOUS_X_MIN      = -2.20   # FIX-v5.11: was -2.40 → 20cm wand-marge (minder westwand-hits)
+BOUS_X_MAX      =  2.20   # FIX-v5.11: was  2.40 → 20cm wand-marge (minder oostwand-hits)
 BOUS_STRIP_STEP =  0.35
-BOUS_WP_RADIUS  =  0.22   # FIX-7B: 0.40 → 0.22m (betere wanddekking)
+BOUS_WP_RADIUS  =  0.28   # FIX-v5.11: 0.22 → 0.28m (hoek-WPs eerder bereikt, minder vastlopen)
 
 # FIX-7A: Dynamische obstakeldetectie via frustration timeout
 # Vervangt alle hardcoded meubelconstanten (TABLE_*, SOFA_*).
 # Als robot >WP_FRUSTRATION_TIME sec geen vooruitgang maakt → waypoint overgeslagen.
-WP_FRUSTRATION_TIME = 5.0   # seconden zonder vooruitgang (>0.04m) → skip
+WP_FRUSTRATION_TIME = 8.0   # FIX-v5.11: 5.0 → 8.0s (meer tijd voor echte obstakelomzeiling)
 
 # FIX-7C: Vloeiender rijgedrag
 SPEED_RAMP      = 5.0    # versnellingsramp: MAX_SPEED/s
@@ -134,6 +134,19 @@ STUCK_DIST      = 0.05   # m minimale verwachte verplaatsing in STUCK_TIMEOUT se
 # Frustration-timer drempel: pas activeren als robot dicht bij waypoint is
 # (ver weg: obstakelomzeiling is verwacht — geen vals positief frustration)
 WP_NEAR_THRESH  = 1.5    # m — alleen frustration-tracking binnen deze afstand
+
+# Passieve LiDAR-wandkartering (inkrementeel, geen toegewijde scanfase)
+# De robot verzamelt LiDAR-wandpunten TIJDENS het normale rijden (STOFZUIGEN).
+# Na de eerste volledige STOFZUIGEN-pas worden kamercontouren berekend en
+# boustrophedon-waypoints hergegenereerd voor de volgende cyclus.
+# Zo gedraagt de robot zich zoals de echte Roomba® 205 met ClearView™ LiDAR:
+# de kaart wordt incrementeel opgebouwd terwijl de robot schoonmaakt. (irobot.com)
+SCAN_MARGIN   = 0.30   # veiligheidsmarge t.o.v. gedetecteerde wandpunten (m)
+
+# Persistente tapijt-gridkaart (sensor-gebaseerde herkenning, DWEILEN-vermijding)
+# Cel-grootte 0.25m. Elke CARPET_FULL-treffer voegt cel(len) toe aan carpet_map.
+# STOFZUIGEN bouwt de kaart; DWEILEN gebruikt hem voor WP-uitsluiting en GPS-bewaking.
+CARPET_CELL_SIZE = 0.25   # m per gridcel voor tapijt-kaart
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -168,8 +181,12 @@ class RoombaController:
         self.last_evasion_time  = 0.0
 
         # Tapijt-ontsnapping (GPS-gestuurd, DWEILEN-only)
-        self.in_carpet_escape    = False
-        self.carpet_escape_count = 0
+        self.in_carpet_escape     = False
+        self.carpet_escape_count  = 0
+        # Ontsnappingsrichting: (tx, ty) doel.
+        # Zuid (pos[0], Y_MIN-0.60) als robot ten zuiden van tapijt-middelpunt;
+        # Oost (CARPET_SAFE_X, pos[1]) als robot diep in het tapijt zit.
+        self.carpet_escape_target = (CARPET_SAFE_X, 0.0)
 
         # Boustrophedon (ClearView™ LiDAR navigatie — rechte banen, wand-tot-wand)
         self.bous_waypoints = self._generate_waypoints()
@@ -178,6 +195,17 @@ class RoombaController:
         # FIX-7A: Waypoint frustration tracking (vervangt hardcoded meubelzones)
         self.wp_prev_dist     = float('inf')
         self.wp_progress_time = 0.0   # tijdstip van laatste betekenisvolle vooruitgang
+
+        # Persistente tapijt-gridkaart: set van (ix, iy) cel-indices bevestigd door sensor.
+        # Wordt gevuld tijdens STOFZUIGEN (sensor mag tapijt detecteren); gebruikt in
+        # DWEILEN voor WP-uitsluiting en proactieve GPS-bewaking.
+        self.carpet_map = set()
+
+        # Passieve LiDAR-wandkartering: wandpunten verzameld tijdens normaal rijden.
+        # Na eerste volledige STOFZUIGEN → kamercontouren herberekend voor volgende cyclus.
+        self.scan_wall_pts       = []    # wandpunten (wx, wy) in wereldcoördinaten
+        self.room_bounds_computed = False  # True na eerste STOFZUIGEN-cyclus
+        self.last_scan_collect_t  = 0.0   # tijdstip van laatste wandpunt-collectie
 
         # Persistente kaartkennis: bijgehouden gereinigde/verwerkte waypoints per fase.
         # Overleeft laadcycli zodat de robot na het opladen VERDERGAAT i.p.v. opnieuw begint.
@@ -226,7 +254,7 @@ class RoombaController:
 
         self._setup_devices()
         self._set_leds("UNDOCKING")
-        print(f"[SYSTEEM] Controller v5.7 gestart. State: {self.state}")
+        print(f"[SYSTEEM] Controller v5.11 gestart. State: {self.state}")
         print(f"[SYSTEEM] Batterij max: {BATTERY_MAX:.0f} J | "
               f"Terugkeerdrempel: {BATTERY_LOW_PCT*100:.0f}% | "
               f"Roaming: {ROAMING_DURATION:.0f}s per fase")
@@ -298,6 +326,7 @@ class RoombaController:
             "DOCKING":    (1, 0),
             "CHARGING":   (0, 0),
             "UNDOCKING":  (1, 0),
+            "SCANNING":   (1, 0),   # LiDAR-kamerafmeting (knippert status-LED)
         }
         s, b = leds.get(state, (1, 0))
         self.status_led.set(s)
@@ -330,35 +359,114 @@ class RoombaController:
     # ── boustrophedon waypoint-generatie ──────────────────────────────────────
     def _generate_waypoints(self):
         """
-        Genereer een uniform zigzag-rasterpatroon over de volledige vloer.
+        Fallback: genereer waypoints met vaste (hardcoded) kamerafmetingen.
+        Wordt aangeroepen bij initialisatie. Na een succesvolle SCANNING-state
+        worden de waypoints hergegenereerd via _generate_boustrophedon() met
+        dynamisch ontdekte kamergrenzen.
+        """
+        return self._generate_boustrophedon(
+            BOUS_X_MIN, BOUS_X_MAX, BOUS_Y_MIN, BOUS_Y_MAX
+        )
+
+    def _generate_boustrophedon(self, x_min, x_max, y_min, y_max):
+        """
+        Genereer een uniform zigzag-rasterpatroon binnen de opgegeven kamergrenzen.
 
         Gebaseerd op ClearView™ LiDAR navigatieprincipe van de echte Roomba® 205:
         'maximizes floor-cleaning coverage wall-to-wall, cleans in neat rows'
         (bron: irobot.com)
 
-        FIX-7A: GEEN meubelzone-clipping meer. Alle waypoints lopen van
-        BOUS_X_MIN (-2.40m) tot BOUS_X_MAX (+2.40m) — wand-tot-wand.
-        Obstakels worden dynamisch omzeild via:
-          1. Reactieve LiDAR-ontwijking (prioriteit 1)
-          2. Waypoint frustration timeout (WP_FRUSTRATION_TIME sec zonder
-             vooruitgang → waypoint overgeslagen)
-        Dit zorgt ervoor dat de robot correct werkt ongeacht meubelposities,
-        net zoals de echte Roomba 205 dat doet.
+        Aangeroepen met hardcoded BOUS_* waarden als fallback bij initialisatie,
+        en met dynamisch gemeten grenzen na de SCANNING-state zodat de controller
+        correct werkt ongeacht de kamergrootte.
+
+        Obstakels worden reactief omzeild (LiDAR + frustration timeout) — geen
+        hardcoded meubelzones nodig.
         """
         pts = []
-        y = BOUS_Y_MIN
+        y = y_min
         going_east = True
-        while y <= BOUS_Y_MAX + 0.01:
+        while y <= y_max + 0.01:
             yr = round(y, 2)
-            if going_east:
-                pts.append((BOUS_X_MIN, yr))
-                pts.append((BOUS_X_MAX, yr))
+            # Lader-hoekuitsluiting: het oost-uiteinde van stroken dicht bij de
+            # lader (Y > CHARGER_Y - 0.80 = 2.05m) wordt teruggebracht tot
+            # CHARGER_X - 0.50 = 1.50m om de lader-arm te vermijden.
+            # Zo worden WPs in de geblokkeerde noordoost-hoek nooit gegenereerd.
+            if yr > CHARGER_Y - 0.80:
+                x_east = min(x_max, CHARGER_X - 0.50)
             else:
-                pts.append((BOUS_X_MAX, yr))
-                pts.append((BOUS_X_MIN, yr))
+                x_east = x_max
+            if going_east:
+                pts.append((x_min, yr))
+                pts.append((x_east, yr))
+            else:
+                pts.append((x_east, yr))
+                pts.append((x_min, yr))
             y += BOUS_STRIP_STEP
             going_east = not going_east
         return pts
+
+    def _compute_room_bounds(self, keep_wp_done=False):
+        """
+        Bereken kamergrenzen uit de verzamelde LiDAR-wandpunten (SCANNING-state).
+
+        Methode: 5e/95e percentielfiltering van X- en Y-coördinaten.
+        Dit verwijdert uitschieters door meubels of vloer-oneffenheden en geeft
+        een betrouwbare schatting van de echte wandposities.
+
+        Na berekening worden bous_waypoints hergegenereerd en wp_done gereset,
+        zodat de robot de volledige kamer in banen afdekt.
+        """
+        if len(self.scan_wall_pts) < 50:
+            print(f"[PASSIEVE SCAN] Te weinig punten ({len(self.scan_wall_pts)}) "
+                  f"→ standaard kamerafmetingen behouden")
+            return
+
+        xs = sorted(p[0] for p in self.scan_wall_pts)
+        ys = sorted(p[1] for p in self.scan_wall_pts)
+        n  = len(xs)
+
+        # 5e/95e percentiel: robuust tegen uitschieters door meubels
+        p5  = max(0, n // 20)
+        p95 = min(n - 1, n - n // 20)
+
+        raw_x_min = xs[p5]
+        raw_x_max = xs[p95]
+        raw_y_min = ys[p5]
+        raw_y_max = ys[p95]
+
+        # Voeg veiligheidsmarge toe (SCAN_MARGIN) zodat robot niet te dicht bij wand komt
+        new_x_min = raw_x_min + SCAN_MARGIN
+        new_x_max = raw_x_max - SCAN_MARGIN
+        new_y_min = raw_y_min + SCAN_MARGIN
+        new_y_max = raw_y_max - SCAN_MARGIN
+
+        # Minimale kamergrootte bewaken (voorkomt degeneratie bij slechte scan)
+        if new_x_max - new_x_min < 1.0 or new_y_max - new_y_min < 1.0:
+            print(f"[PASSIEVE SCAN] Onredelijke kamergrenzen "
+                  f"X=[{new_x_min:.2f},{new_x_max:.2f}], "
+                  f"Y=[{new_y_min:.2f},{new_y_max:.2f}] → standaard behouden")
+            return
+
+        print(f"[SCANNING] Kamer ontdekt: "
+              f"X=[{new_x_min:.2f}, {new_x_max:.2f}], "
+              f"Y=[{new_y_min:.2f}, {new_y_max:.2f}] "
+              f"({n} punten, marge={SCAN_MARGIN}m)")
+
+        old_count = len(self.bous_waypoints)
+        self.bous_waypoints = self._generate_boustrophedon(
+            new_x_min, new_x_max, new_y_min, new_y_max
+        )
+        if not keep_wp_done:
+            # Volledig opnieuw beginnen (eerste scan vanuit SCANNING-state)
+            self.bous_wp_idx = 0
+            self.wp_done = {"STOFZUIGEN": set(), "DWEILEN": set()}
+        # Als keep_wp_done=True: huidige wp_done blijft behouden; nieuwe waypoints
+        # worden gebruikt vanaf de volgende fase (DWEILEN). wp_idx wordt bijgewerkt
+        # in UNDOCKING TURN via de "eerste ongereinigde WP"-zoeklogica.
+        print(f"[PASSIEVE SCAN] Waypoints bijgewerkt: "
+              f"{old_count} → {len(self.bous_waypoints)} WP "
+              f"({'wp_done behouden' if keep_wp_done else 'verse start'})")
 
     # ── sensoren ──────────────────────────────────────────────────────────────
     def _read_sensors(self):
@@ -378,6 +486,27 @@ class RoombaController:
             self.last_logged_pct = pct
         if pct <= 20 and self.state not in ("CHARGING", "DOCKING"):
             self.battery_led.set(1)
+
+        # ── Persistente tapijt-gridkaart: update ALLEEN tijdens STOFZUIGEN ──
+        # FIX-v5.10 Bug1: Kaart alleen bijwerken in STOFZUIGEN — niet in DOCKING/
+        # CHARGING (anders markeert de lader-dock als tapijt door valse sensorreading).
+        # Exact één cel markeren (geen 3×3 buurt) — de 0.40m buffer in _wp_in_carpet_zone
+        # biedt al voldoende veiligheidsmarge. Dit voorkomt vals-positieve cellen op cy=-1
+        # (Y=-0.25m) die de GPS-bewaking over de hele kamer lieten vuren.
+        # Log-spam beperkt: alleen elke 10e nieuwe cel loggen.
+        if self.state == "STOFZUIGEN" and self.carpet_val > CARPET_FULL:
+            bearing_rad = math.radians(self.bearing)
+            sx = self.pos[0] + 0.16 * math.sin(bearing_rad)
+            sy = self.pos[1] + 0.16 * math.cos(bearing_rad)
+            cx = int(sx / CARPET_CELL_SIZE)
+            cy = int(sy / CARPET_CELL_SIZE)
+            cell = (cx, cy)
+            if cell not in self.carpet_map:
+                self.carpet_map.add(cell)
+                if len(self.carpet_map) % 10 == 1:   # log 1e, 11e, 21e, ... cel
+                    print(f"[TAPIJT-KAART] Cel ({cx},{cy}) "
+                          f"bij sensor=({sx:.2f},{sy:.2f}), "
+                          f"totaal {len(self.carpet_map)} cellen")
 
     # ── watchdog ──────────────────────────────────────────────────────────────
     def _watchdog(self, t):
@@ -446,34 +575,78 @@ class RoombaController:
         return (CARPET_X_MIN <= self.pos[0] <= CARPET_X_MAX and
                 CARPET_Y_MIN <= self.pos[1] <= CARPET_Y_MAX)
 
+    def _wp_in_carpet_zone(self, wx, wy, buffer=0.20):
+        """
+        True als waypoint (wx, wy) binnen de tapijt-Y-band + buffer valt.
+
+        FIX-v5.11: Alleen Y-as wordt gecontroleerd (niet meer 2D gridcel-afstand).
+        Reden: de oude 2D-check sloeg WPs aan X=-2.2 (ver van tapijt in X) NIET over,
+        terwijl de GPS-bewaking wél vuurde op die Y-posities → eindeloze oscillatie.
+        Een Y-only check is consistent met de GPS-bewaking en de fysieke realiteit:
+        het tapijt loopt over (bijna) de volledige breedte van de kamer.
+
+        buffer = 0.20m: veiligheidsmarge ten zuiden/noorden van tapijt-Y-grenzen.
+        """
+        if not self.carpet_map:
+            return CARPET_Y_MIN - buffer <= wy <= CARPET_Y_MAX + buffer
+
+        cy_min = self._min_carpet_y()
+        cy_max = self._max_carpet_y()
+        return (cy_min - buffer) <= wy <= (cy_max + buffer)
+
+    def _min_carpet_y(self):
+        """Laagste Y-coördinaat van gekarteeerde tapijt-cellen (in meters)."""
+        if not self.carpet_map:
+            return CARPET_Y_MIN
+        return min(cy * CARPET_CELL_SIZE for (_, cy) in self.carpet_map)
+
+    def _max_carpet_y(self):
+        """Hoogste Y-coördinaat van gekarteeerde tapijt-cellen (in meters)."""
+        if not self.carpet_map:
+            return CARPET_Y_MAX
+        return max(cy * CARPET_CELL_SIZE for (_, cy) in self.carpet_map)
+
     def _handle_carpet_escape(self, t):
         """
-        GPS-gestuurde tapijtvermijding voor DWEILEN.
-        Zet in_carpet_escape EENMALIG; navigeer naar X=CARPET_SAFE_X.
-        Returns True als ontsnapping actief is.
+        Sensor-gestuurde tapijtvermijding voor DWEILEN.
+        Vuurt als carpet_sensor boven drempel of GPS meldt robot op tapijt.
+        Altijd SOUTH ontsnappen: robot rijdt naar Y = carpet_y_min - 0.50.
 
-        FIX-2: GPS-gevalideerde tapijt-trigger – vermijdt vals positieven
-        bij TV-kast (X≈2.62) en lader (X≈2.39) door vloer-oneffenheden.
+        FIX-v5.11: Altijd SOUTH ontsnappen (verwijderd: Oost-optie).
+        In DWEILEN benadert de robot het tapijt altijd vanuit het zuiden
+        (alle tapijt-WPs zijn geskipt via Y-band check). SOUTH is dus altijd
+        de juiste richting. De Oost-ontsnapping veroorzaakte lussen omdat
+        het doel halverwege het tapijt lag.
+
+        FIX-v5.11: Geen safe_south meer in de Vrij-conditie.
+        De Y-band skip zorgt dat de robot na de ontsnapping niet meer terug-
+        navigeert naar een WP in de tapijt-Y-zone. sensor_clear + not gps_on
+        is voldoende.
         """
+        carpet_y_min = self._min_carpet_y()
+
         gps_on   = self._on_carpet_gps()
-        # gps_near: gebruik CARPET_Y_MIN als ondergrens om fout-positieven te vermijden
-        # wanneer robot net onder tapijt navigeert (Y≈-0.05, sensoroverlap robotstraal)
         gps_near = (-2.55 <= self.pos[0] <= 0.55 and
-                    CARPET_Y_MIN <= self.pos[1] <= CARPET_Y_MAX + 0.25)
+                    CARPET_Y_MIN - 0.20 <= self.pos[1] <= CARPET_Y_MAX + 0.25)
         trigger  = (self.carpet_val > CARPET_FULL or
                     (self.carpet_val > CARPET_EDGE and gps_near))
 
         if not self.in_carpet_escape and (trigger or gps_on):
             self.in_carpet_escape    = True
             self.carpet_escape_count += 1
+            # Altijd SOUTH: zet robot duidelijk ten zuiden van tapijt-rand
+            target_y = carpet_y_min - 0.50
+            self.carpet_escape_target = (self.pos[0], target_y)
             print(f"[TAPIJT] Ontsnapping #{self.carpet_escape_count} "
                   f"(sensor={self.carpet_val:.0f}, "
-                  f"GPS={self.pos[0]:.2f},{self.pos[1]:.2f}) → X={CARPET_SAFE_X}")
+                  f"GPS={self.pos[0]:.2f},{self.pos[1]:.2f}) → SOUTH "
+                  f"(doel Y={target_y:.2f}, tapijt_min_Y={carpet_y_min:.2f})")
             self.last_carpet_log = t
 
         if not self.in_carpet_escape:
             return False
 
+        # Vrij-conditie: sensor helder + GPS bevestigt buiten tapijt
         sensor_clear = self.carpet_val < (CARPET_EDGE - 30)
         if sensor_clear and not gps_on:
             self.in_carpet_escape = False
@@ -482,9 +655,10 @@ class RoombaController:
                   f"GPS={self.pos[0]:.2f},{self.pos[1]:.2f})")
             return False
 
-        # Navigeer richting CARPET_SAFE_X (oost van tapijt)
-        dx = CARPET_SAFE_X - self.pos[0]
-        dy = clamp(self.pos[1], -2.5, 2.5) - self.pos[1]
+        # Navigeer naar ontsnappingsdoel (zuiden)
+        tx, ty = self.carpet_escape_target
+        dx = tx - self.pos[0]
+        dy = ty - self.pos[1]
         tb = math.degrees(math.atan2(dx, dy))
         if tb < 0.0:
             tb += 360.0
@@ -508,6 +682,30 @@ class RoombaController:
              + FIX-7A frustration timeout (dynamisch, geen hardcoded meubels)
              + FIX-7C speed ramping + look-ahead (vloeiender rijgedrag)
         """
+        # ── Prioriteit 0: Fase volledig afgerond → meteen terugkeren ─────
+        # Als alle waypoints in de huidige fase verwerkt zijn, hoeft de
+        # robot niet te wachten tot de batterij leeg is. Ga direct naar
+        # RETURNING zodat CHARGING de fasewisseling kan afhandelen.
+        #
+        # FIX-v5.10 Bug3: Passieve scan hergeneratie UITGESCHAKELD.
+        # _compute_room_bounds() schoot te ver uit (±2.60m i.p.v. ±2.40m)
+        # door schuin invallende LiDAR-stralen op wandkanten. Dit veroorzaakte
+        # 30 i.p.v. 28 waypoints en navigatie naar Y=±2.60 (nabij wanden/lader),
+        # wat extra bumper-hits en batterijverlies veroorzaakte.
+        # De BOUS_*-constanten bieden al correcte kamergrenzen voor deze ruimte.
+        phase_key = "STOFZUIGEN" if allow_carpet else "DWEILEN"
+        if len(self.wp_done[phase_key]) >= len(self.bous_waypoints):
+            print(f"[MISSIE] {phase_key} volledig gereinigd "
+                  f"({len(self.wp_done[phase_key])}/{len(self.bous_waypoints)} WP) "
+                  f"→ RETURNING voor fasewisseling")
+            self.pid_bearing.reset()
+            self.in_carpet_escape     = False
+            self.returning_start_time = 0.0
+            self.cleaning_speed       = 0.0
+            self.state = "RETURNING"
+            self._set_leds("RETURNING")
+            return
+
         # ── Prioriteit 1: Controleer batterij en tijdslimiet ──────────────
         battery_low = self.battery < (BATTERY_LOW_PCT * BATTERY_MAX)
         time_up     = (t - self.roaming_start_time) >= ROAMING_DURATION
@@ -524,6 +722,13 @@ class RoombaController:
             return
 
         # ── Prioriteit 2: Tapijtvermijding (DWEILEN only) ─────────────────
+        # FIX-v5.11: GPS-proactieve bewaking VERWIJDERD.
+        # De bewaking vuurde te breed: elke Y boven de drempel (inclusief de
+        # laderzone Y=2.22 en de hele zuidhelft van de kamer) werd als "gevaarlijk"
+        # beschouwd, waardoor de robot eindeloos rondjes draaide.
+        # De Y-band WP-skip (Priority 4) garandeert nu dat de robot NOOIT een WP
+        # in de tapijt-Y-zone navigeert. De sensor-escape in _handle_carpet_escape
+        # is de enige veiligheidslaag die nog nodig is — en die is al voldoende.
         if not allow_carpet:
             if self._handle_carpet_escape(t):
                 return
@@ -589,15 +794,15 @@ class RoombaController:
             # "Cleans in neat rows, wall-to-wall" — irobot.com / ClearView™ LiDAR
             # Geen hardcoded meubelzones; dynamisch via LiDAR + frustration timeout.
 
-            # DWEILEN: sla volledige stroken over waarvan Y in tapijt-zone valt.
-            # Reden: ook al ligt het waypoint zelf buiten het tapijt (bijv. X=+2.4),
-            # de route erheen kruist het tapijt. Door op Y-niveau te filteren wordt
-            # het tapijt nooit doorkruist, ongeacht de richting (oost of west).
+            # DWEILEN: sla waypoints over die in of te dicht bij een gekarteeerde tapijt-cel
+            # liggen. Sensor-gebaseerde carpet_map vervangt de hardcoded Y-grens:
+            # elk waypoint binnen 0.40m van een tapijt-cel (gemeten in gridcel-afstand)
+            # wordt overgeslagen. Fallback naar hardcoded Y-grens als kaart nog leeg is.
             if not allow_carpet:
                 skips = 0
                 while skips < len(self.bous_waypoints):
                     wx, wy = self.bous_waypoints[self.bous_wp_idx]
-                    in_carpet_strip = (CARPET_Y_MIN - 0.20 <= wy <= CARPET_Y_MAX + 0.20)
+                    in_carpet_strip = self._wp_in_carpet_zone(wx, wy, buffer=0.20)
                     if in_carpet_strip:
                         self.wp_done["DWEILEN"].add(self.bous_wp_idx)
                         self.bous_wp_idx = (self.bous_wp_idx + 1) % len(self.bous_waypoints)
@@ -726,6 +931,27 @@ class RoombaController:
             self.set_motors(self.cleaning_speed + total_turn,
                             self.cleaning_speed - total_turn)
 
+            # ── Passieve wandkartering (STOFZUIGEN only, max 1×/5s) ───────
+            # Verzamel LiDAR-wandpunten tijdens normaal rijden zonder toegewijde
+            # scanfase. Na eerste volledige STOFZUIGEN worden kamercontouren
+            # herberekend (zie Prioriteit 0). Zo gedraagt de robot zich zoals een
+            # echte LiDAR-stofzuiger: kaart wordt incrementeel opgebouwd.
+            if allow_carpet and not self.room_bounds_computed:
+                if t - self.last_scan_collect_t >= 5.0 and self.ranges:
+                    self.last_scan_collect_t = t
+                    bearing_rad = math.radians(self.bearing)
+                    sensor_x = self.pos[0] + 0.15 * math.sin(bearing_rad)
+                    sensor_y = self.pos[1] + 0.15 * math.cos(bearing_rad)
+                    n_rays = len(self.ranges)
+                    for i, r in enumerate(self.ranges):
+                        if 0.10 < r < 5.0:
+                            offset_deg     = -90.0 + (180.0 / max(n_rays - 1, 1)) * i
+                            wb_rad         = bearing_rad + math.radians(offset_deg)
+                            self.scan_wall_pts.append((
+                                sensor_x + r * math.sin(wb_rad),
+                                sensor_y + r * math.cos(wb_rad)
+                            ))
+
     # ── stuck-detectie ────────────────────────────────────────────────────────
     def _check_stuck(self, t):
         """
@@ -783,6 +1009,8 @@ class RoombaController:
             elif self.undock_phase == "TURN":
                 err = angle_error(180.0, self.bearing)
                 if abs(err) < 2.5 or (t - self.undock_timer > 5.0):
+                    # Direct naar reinigingsfase — geen toegewijde scanfase.
+                    # Kaarting gebeurt incrementeel tijdens het rijden (passieve scan).
                     self.roaming_start_time   = t
                     self.returning_start_time = 0.0
                     self.returning_via        = None
@@ -871,9 +1099,12 @@ class RoombaController:
                 #   (pos)→(0.5,0.5): geen tafelkruising ✅
                 #   (0.5,0.5)→predock(2.0,1.8): geen tafelkruising ✅
                 if self.pos[1] < 0.30:
-                    self.returning_via = (0.5, 0.5)
+                    # FIX-v5.10: relatief aan PREDOCK in plaats van hardcoded (0.5, 0.5)
+                    via_x = PREDOCK_X - 1.50                      # 0.50m west van predock
+                    via_y = max(0.30, PREDOCK_Y - 1.30)           # 1.30m south van predock
+                    self.returning_via = (via_x, via_y)
                     print(f"[RETURNING] Robot Y={self.pos[1]:.2f} < 0.30 → "
-                          f"omleiding via tussentijds punt (0.5, 0.5)")
+                          f"omleiding via tussentijds punt ({via_x:.2f},{via_y:.2f})")
                 else:
                     self.returning_via = None
 

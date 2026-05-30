@@ -61,7 +61,7 @@
         <mxCell id="ph_ali" value="ALIGNING" style="swimlane;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=11;startSize=24;" parent="1" vertex="1">
           <mxGeometry x="50" y="408" width="700" height="190" as="geometry" />
         </mxCell>
-        <mxCell id="a_ali" value="P-koersregeling naar 0° (Noord)&#xa;gain = 0,06 | SP = 0°&#xa;(min 2%, max 18% van MAX_SPEED)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ali" vertex="1">
+        <mxCell id="a_ali" value="PID-koersregeling naar 0° (Noord)&#xa;Kp = 0,045 | Kd = 0,001 | SP = 0°" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ali" vertex="1">
           <mxGeometry x="195" y="36" width="260" height="48" as="geometry" />
         </mxCell>
         <mxCell id="d_ali" value="Koersfout &lt; 6°&#xa;OF timeout 10 s?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ali" vertex="1">
@@ -112,7 +112,7 @@
         <mxCell id="d_chg" value="Batterij ≥ 95%&#xa;OF timeout 90 s?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" parent="ph_chg" vertex="1">
           <mxGeometry x="195" y="112" width="260" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="a_fas" value="Start UNDOCKING&#xa;(fasewisseling STOFZUIGEN↔DWEILEN&#xa;alleen als fase volledig gereinigd)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" parent="ph_chg" vertex="1">
+        <mxCell id="a_fas" value="Start UNDOCKING&#xa;(phase switch VACUUMING↔MOPPING&#xa;only if phase fully cleaned)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" parent="ph_chg" vertex="1">
           <mxGeometry x="490" y="122" width="200" height="50" as="geometry" />
         </mxCell>
         <mxCell id="ec1" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" parent="ph_chg" source="a_chg" target="d_chg" edge="1">

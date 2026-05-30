@@ -1,6 +1,6 @@
 <mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.0.3 Chrome/140.0.7339.249 Electron/38.7.0 Safari/537.36" version="29.0.3">
   <diagram id="pHCA8OyKyr_fRwMTGwmh" name="Page-1">
-    <mxGraphModel dx="1955" dy="1677" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+    <mxGraphModel dx="1955" dy="1870" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="1020" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -13,10 +13,10 @@
         <mxCell id="n1" value="UNDOCKING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;" parent="1" vertex="1">
           <mxGeometry x="311" y="62" width="192" height="55" as="geometry" />
         </mxCell>
-        <mxCell id="n2" value="STOFZUIGEN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+        <mxCell id="n2" value="VACUUMING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=13;" parent="1" vertex="1">
           <mxGeometry x="65" y="198" width="192" height="55" as="geometry" />
         </mxCell>
-        <mxCell id="n3" value="DWEILEN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+        <mxCell id="n3" value="MOPPING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=13;" parent="1" vertex="1">
           <mxGeometry x="558" y="198" width="192" height="55" as="geometry" />
         </mxCell>
         <mxCell id="n4" value="ESCAPE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=13;" parent="1" vertex="1">
@@ -37,14 +37,14 @@
         <mxCell id="e01" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" parent="1" source="n0" target="n1" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e1a" value="mission_phase = STOFZUIGEN&#xa;[koers ≈ 180° bereikt]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;" parent="1" source="n1" target="n2" edge="1">
+        <mxCell id="e1a" value="mission_phase = VACUUMING&#xa;[koers ≈ 180° bereikt]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;" parent="1" source="n1" target="n2" edge="1">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="130" y="70" />
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="e1b" value="mission_phase = DWEILEN&#xa;[koers ≈ 180° bereikt]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;" parent="1" source="n1" target="n3" edge="1">
+        <mxCell id="e1b" value="mission_phase = MOPPING&#xa;[koers ≈ 180° bereikt]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;" parent="1" source="n1" target="n3" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e25" value="batterij ≤ 20% OF tijdslimiet&#xa;(20 min) OF alle WPs verwerkt" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;exitX=0.5;exitY=1;exitPerimeter=0;entryX=0;entryY=0.5;entryPerimeter=0;" parent="1" source="n2" target="n5" edge="1">
@@ -92,7 +92,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="ee2" value="manoeuvre klaar&#xa;[prev_state = STOFZUIGEN]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;entryX=0.5;entryY=0;entryPerimeter=0;" parent="1" target="n2" edge="1">
+        <mxCell id="ee2" value="manoeuvre klaar&#xa;[prev_state = VACUUMING]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;entryX=0.5;entryY=0;entryPerimeter=0;" parent="1" target="n2" edge="1">
           <mxGeometry x="0.2634" relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="920" y="358" />
@@ -103,7 +103,7 @@
             <mxPoint as="offset" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="ee3" value="manoeuvre klaar&#xa;[prev_state = DWEILEN]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;exitX=1;exitY=0.5;exitPerimeter=0;entryX=1;entryY=0.5;entryPerimeter=0;" parent="1" source="n4" target="n3" edge="1">
+        <mxCell id="ee3" value="manoeuvre klaar&#xa;[prev_state = MOPPING]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;exitX=1;exitY=0.5;exitPerimeter=0;entryX=1;entryY=0.5;entryPerimeter=0;" parent="1" source="n4" target="n3" edge="1">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="1040" y="386" />
@@ -136,7 +136,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="e81" value="batterij ≥ 95% OF timeout 90 s&#xa;→ fasewisseling" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;exitX=0;exitY=0.5;exitPerimeter=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" parent="1" source="n8" target="n1" edge="1">
+        <mxCell id="e81" value="batterij ≥ 95% OF timeout 90 s&#xa;[fase niet volledig / 1e fase klaar]&#xa;→ fasewisseling" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;exitX=0;exitY=0.5;exitPerimeter=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" parent="1" source="n8" target="n1" edge="1">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="40" y="746" />
@@ -144,6 +144,21 @@
               <mxPoint x="359" y="20" />
             </Array>
           </mxGeometry>
+        </mxCell>
+        <mxCell id="n9" value="FINISHED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9dbc5;strokeColor=#d79b00;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="311" y="858" width="192" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e8v" value="batterij ≥ 95% OF timeout 90 s&#xa;[beide fases volledig klaar]" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;align=center;" parent="1" source="n8" target="n9" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="end_v" value="" style="ellipse;html=1;shape=endState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="392" y="960" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ev_end" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" parent="1" source="n9" target="end_v" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6" value="Missievoltooiing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9dbc5;strokeColor=#d79b00;fontSize=9;" parent="1" vertex="1">
+          <mxGeometry x="807" y="721" width="110" height="28" as="geometry" />
         </mxCell>
         <mxCell id="leg_title" value="Legenda" style="text;html=1;strokeColor=none;fillColor=none;fontStyle=1;fontSize=11;" parent="1" vertex="1">
           <mxGeometry x="807" y="521" width="80" height="20" as="geometry" />

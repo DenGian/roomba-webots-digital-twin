@@ -134,7 +134,7 @@ De sensorwaarde wordt gebruikt voor een proportionele correctieterm (P-correctie
 | Meetbereik             | 0 – 0,1 m (lookupTable: 0 m → 1000, 0,1 m → 0)                          |
 | Drempelwaarden         | CARPET_FULL > 730 — volledig op tapijt, CARPET_EDGE > 670 — tapijt­rand |
 
-De tapijtsensor onderscheidt vloer van tapijt op basis van reflectiewaarden. Tijdens **STOFZUIGEN** worden positieve metingen (> CARPET_FULL) gebruikt om een persistente tapijt­gridkaart op te bouwen. Tijdens **DWEILEN** triggert een positieve meting de tapijtvermijdings­routine.
+De tapijtsensor onderscheidt vloer van tapijt op basis van reflectiewaarden. Tijdens **VACUUMING** worden positieve metingen (> CARPET_FULL) gebruikt om een persistente tapijt­gridkaart op te bouwen. Tijdens **MOPPING** triggert een positieve meting de tapijtvermijdings­routine.
 
 ### 3.5 Klifdetectoren (4×)
 
@@ -170,7 +170,7 @@ bearing = atan2(compass[1], compass[0])  [radialen → graden]
 0° = Noord (+Y), 90° = Oost (+X)
 ```
 
-Het kompas wordt gebruikt bij de koersregeling in ALIGNING, bij de UNDOCKING-draaibeweging en bij de koersberekening naar waypoints.
+Het kompas wordt gebruikt bij de PID-koersregeling in ALIGNING, bij de UNDOCKING-draaibeweging en bij de koersberekening naar waypoints.
 
 ---
 
@@ -212,16 +212,17 @@ De controller implementeert een **acht-toestandsmachine**. Elke state heeft een 
 
 ### 5.1 Overzicht van alle states
 
-| State      | Beschrijving                                                                |
-| ---------- | --------------------------------------------------------------------------- |
-| UNDOCKING  | Robot rijdt achteruit weg van laadstation en draait naar reinigingsrichting |
-| STOFZUIGEN | Systematisch stofzuigen via boustrophedon-navigatie, tapijt toegestaan      |
-| DWEILEN    | Systematisch dweilen via boustrophedon-navigatie, tapijt verboden           |
-| ESCAPE     | Noodmanoeuvre na bumper­hit of afgronddetectie                              |
-| RETURNING  | GPS-gestuurde terugkeer naar de pre-dock positie                            |
-| ALIGNING   | P-gestuurde uitlijning op 0° (Noord) voor het docken (gain = 0,06)          |
-| DOCKING    | Langzaam insturen van het laadstation op basis van GPS X-correctie          |
-| CHARGING   | Stilstaand opladen, fasewisseling bij volledig opgeladen batterij           |
+| State     | Beschrijving                                                                |
+| --------- | --------------------------------------------------------------------------- |
+| UNDOCKING | Robot rijdt achteruit weg van laadstation en draait naar reinigingsrichting |
+| VACUUMING | Systematisch stofzuigen via boustrophedon-navigatie, tapijt toegestaan      |
+| MOPPING   | Systematisch dweilen via boustrophedon-navigatie, tapijt verboden           |
+| ESCAPE    | Noodmanoeuvre na bumper­hit of afgronddetectie                              |
+| RETURNING | GPS-gestuurde terugkeer naar de pre-dock positie                            |
+| ALIGNING  | PID-gestuurde uitlijning op 0° (Noord) voor het docken (Kp=0,045, Kd=0,001) |
+| DOCKING   | Langzaam insturen van het laadstation op basis van GPS X-correctie          |
+| CHARGING  | Stilstaand opladen, fasewisseling bij volledig opgeladen batterij           |
+| FINISHED  | Eindstate: VACUUMING + MOPPING beide volledig afgerond; robot staat stil    |
 
 ### 5.2 Transitieoverzicht
 
@@ -229,9 +230,9 @@ De controller implementeert een **acht-toestandsmachine**. Elke state heeft een 
 
 - Fase 1 (REVERSE): robot rijdt achteruit tot Y < 2,1 m of na 4 s
 - Fase 2 (TURN): robot draait naar 180° (rijrichting kamer in)
-- → Overgaat naar `mission_phase` (STOFZUIGEN of DWEILEN)
+- → Overgaat naar `mission_phase` (VACUUMING of MOPPING)
 
-**STOFZUIGEN / DWEILEN:**
+**VACUUMING / MOPPING:**
 
 - → RETURNING als batterij ≤ 20% of tijdslimiet (20 min) overschreden
 - → RETURNING als alle waypoints van de huidige fase verwerkt zijn
@@ -241,7 +242,7 @@ De controller implementeert een **acht-toestandsmachine**. Elke state heeft een 
 
 - Fase 1: achteruit rijden (~1 s)
 - Fase 2: draaien (willekeurige richting, 0,8 – 1,6 s, bij hoeksituatie 180°)
-- → Terug naar vorige state (STOFZUIGEN, DWEILEN of RETURNING)
+- → Terug naar vorige state (VACUUMING, MOPPING of RETURNING)
 
 **RETURNING:**
 
@@ -251,7 +252,7 @@ De controller implementeert een **acht-toestandsmachine**. Elke state heeft een 
 
 **ALIGNING:**
 
-- P-sturing naar kompas­bearing 0° (Noord): `turn_sp = clamp(0,06 × |err|, 2%·MAX, 18%·MAX)`
+- PID-koersregeling naar kompas­bearing 0° (Noord): Kp = 0,045 | Ki = 0,0 | Kd = 0,001
 - → DOCKING als |afwijking| < 6° of na time-out van 10 s
 
 **DOCKING:**
@@ -265,9 +266,14 @@ De controller implementeert een **acht-toestandsmachine**. Elke state heeft een 
 
 - Robot staat stil en laadt op
 - Fasewisseling bij ≥ 95% geladen of na 90 s time-out
-- Als huidige fase volledig is: wisselen van STOFZUIGEN ↔ DWEILEN
-- Als fase nog niet volledig is: zelfde fase hervatten
-- → UNDOCKING
+- Als huidige fase volledig is én beide fases al afgerond: → FINISHED
+- Als huidige fase volledig is maar andere fase nog niet: wisselen VACUUMING ↔ MOPPING → UNDOCKING
+- Als fase nog niet volledig is: zelfde fase hervatten → UNDOCKING
+
+**FINISHED:**
+
+- Robot staat stil; beide LEDs branden als bevestigingssignaal
+- Eindstate: geen verdere overgangen
 
 ### 5.3 Persistente missiecyclus
 
@@ -298,7 +304,7 @@ De rijlogica is opgebouwd als een gelaagd prioriteitssysteem (hoogste prioriteit
 | ---------- | ----------------------------------------------------------------- |
 | 0          | Fase volledig afgerond → onmiddellijk naar RETURNING              |
 | 1          | Batterij laag of tijdslimiet → naar RETURNING                     |
-| 2          | Tapijtvermijding (alleen DWEILEN) via sensor­escape               |
+| 2          | Tapijtvermijding (alleen MOPPING) via sensor­escape               |
 | 3          | LiDAR-obstakelontwijking (reactief, altijd actief)                |
 | 4          | Boustrophedon GPS-navigatie met frustration-timeout en look-ahead |
 
@@ -315,23 +321,23 @@ Vlak voor een waypoint (< 0,55 m) mengt de controller de stuursignalen met de ri
 Bij terugkeer naar het laadstation navigeert de robot in twee fasen:
 
 1. **RETURNING:** GPS-sturing naar pre-dock punt (X = 2,00, Y = 1,80). Bij een startpositie zuidelijk in de kamer (Y < 0,30) wordt een tussentijds via-punt (X = 0,50, Y = 0,50) ingezet om te vermijden dat de robot recht door de tafelzone rijdt.
-2. **ALIGNING + DOCKING:** P-uitlijning op Noord (0°), gevolgd door langzaam insturen met GPS X-correctie.
+2. **ALIGNING + DOCKING:** PID-uitlijning op Noord (0°), gevolgd door langzaam insturen met GPS X-correctie.
 
 ---
 
 ## 7. Reinigingsmodi
 
-### 7.1 STOFZUIGEN
+### 7.1 VACUUMING
 
 - Tapijt is **toegestaan**: de robot rijdt zowel over de vloer als over het tapijt
 - De tapijtsensor registreert tapijt­cellen en voegt deze toe aan de persistente **tapijt­gridkaart**
-- Dezelfde boustrophedon-waypoints als DWEILEN (volledige kamer­breedte)
+- Dezelfde boustrophedon-waypoints als MOPPING (volledige kamer­breedte)
 - Status-LED aan, batterij-LED uit
 
-### 7.2 DWEILEN
+### 7.2 MOPPING
 
 - Tapijt is **verboden**: de dweil mag niet nat worden
-- Aparte DWEILEN-waypoints worden gegenereerd via `_generate_dweilen_waypoints()`:
+- Aparte MOPPING-waypoints worden gegenereerd via `_generate_mopping_waypoints()`:
   - Stroken ten **zuiden** van het tapijt (Y < tapijt­min − 0,20 m): volledige breedte
   - Stroken in de **tapijt-Y-zone**: alleen het oost­gedeelte (X ≥ ca. 0,70 m), zodat de vloer rechts van het tapijt toch gedweild wordt zonder het tapijt zelf te betreden
 - Sensor­gebaseerde tapijtvermijding (zie §8) als extra veiligheidslaag
@@ -339,7 +345,7 @@ Bij terugkeer naar het laadstation navigeert de robot in twee fasen:
 
 ### 7.3 Fasewisseling
 
-Na elke volledige reinigingsfase wisselt de robot van modus: STOFZUIGEN → DWEILEN → STOFZUIGEN → ... De wisseling vindt plaats in de CHARGING-state, nadat alle waypoints van de huidige fase verwerkt zijn.
+Na elke volledige reinigingsfase wisselt de robot van modus: VACUUMING → MOPPING → VACUUMING → ... De wisseling vindt plaats in de CHARGING-state, nadat alle waypoints van de huidige fase verwerkt zijn.
 
 ---
 
@@ -347,7 +353,7 @@ Na elke volledige reinigingsfase wisselt de robot van modus: STOFZUIGEN → DWEI
 
 ### 8.1 Opbouw van de tapijt­gridkaart
 
-Tijdens STOFZUIGEN bouwt de robot een persistente **tapijt­gridkaart** op (set van gridcel-indices). Wanneer de tapijtsensor boven de CARPET_FULL-drempel (730) uitkomt, wordt de sensorpositie omgezet naar een gridcel:
+Tijdens VACUUMING bouwt de robot een persistente **tapijt­gridkaart** op (set van gridcel-indices). Wanneer de tapijtsensor boven de CARPET_FULL-drempel (730) uitkomt, wordt de sensorpositie omgezet naar een gridcel:
 
 ```
 sensorpositie = robotpositie + 0,16 m × rijrichting (vooraan)
@@ -356,16 +362,16 @@ gridcel (cx, cy) = int(sensorpositie / CARPET_CELL_SIZE)   [CARPET_CELL_SIZE = 0
 
 Enkel nieuwe cellen worden toegevoegd (geen duplicaten). De kaart overleeft laadcycli.
 
-### 8.2 Gebruik in DWEILEN
+### 8.2 Gebruik in MOPPING
 
 De tapijt­gridkaart levert:
 
 - **`_min_carpet_y()` / `_max_carpet_y()`:** dynamische Y-grenzen van het tapijt (in meters)
-- **`_carpet_x_east()`:** oostgrens van het tapijt + veiligheidsbuffer → startpunt voor oost­stroken in DWEILEN
+- **`_carpet_x_east()`:** oostgrens van het tapijt + veiligheidsbuffer → startpunt voor oost­stroken in MOPPING
 
 ### 8.3 Sensor­gebaseerde tapijtvermijding
 
-Als de tapijtsensor tijdens DWEILEN boven de drempel uitkomt (of als GPS aangeeft dat de robot op het tapijt staat), activeert de **carpet escape routine**:
+Als de tapijtsensor tijdens MOPPING boven de drempel uitkomt (of als GPS aangeeft dat de robot op het tapijt staat), activeert de **carpet escape routine**:
 
 1. De robot rijdt naar een doelpunt op `carpet_y_min − 0,50 m` (ten zuiden van het tapijt)
 2. De escape wordt beëindigd zodra de sensor onder de drempel valt EN GPS bevestigt dat de robot buiten het tapijt is
@@ -386,26 +392,28 @@ D   = Kd × (ER − prev_ER) / Δt        (differentiërend)
 LMN = clamp(P + I + D, LMN_LLM, LMN_HLM)
 ```
 
-### 9.2 Aanwezigheid in de controller
+### 9.2 Toepassing in de controller
 
-Een `PID_Controller`-object (`pid_bearing`) wordt aangemaakt met de volgende parameters en gereset bij elke toestandsovergang naar ALIGNING:
+De PID-regelaar wordt actief gebruikt voor **koersregeling in de ALIGNING-state**. Het object `pid_bearing` wordt aangemaakt met de volgende parameters en gereset bij elke overgang naar ALIGNING:
 
-| Parameter | Waarde            | Betekenis                         |
-| --------- | ----------------- | --------------------------------- |
-| Kp        | 0,045             | Proportionele gain                |
-| Ki        | 0,0               | Integrerende gain (uitgeschakeld) |
-| Kd        | 0,001             | Differentiërende gain             |
-| SP        | 0,0°              | Gewenste koers: Noord (0°)        |
-| LMN_HLM   | +0,45 × MAX_SPEED | Maximale rechtse sturing          |
-| LMN_LLM   | −0,45 × MAX_SPEED | Maximale linkse sturing           |
+| Parameter | Waarde            | Betekenis                                     |
+| --------- | ----------------- | --------------------------------------------- |
+| Kp        | 0,045             | Proportionele gain (koersfout → sturing)      |
+| Ki        | 0,0               | Integrerende gain (uitgeschakeld)             |
+| Kd        | 0,001             | Differentiërende gain (demping bij overshoot) |
+| SP        | 0,0°              | Gewenste koers: Noord (0°)                    |
+| LMN_HLM   | +0,45 × MAX_SPEED | Maximale rechtse sturing                      |
+| LMN_LLM   | −0,45 × MAX_SPEED | Maximale linkse sturing                       |
 
-De actieve koersregeling in de ALIGNING-state maakt gebruik van een eenvoudige P-sturing:
+Per tijdstap wordt de PID-uitgang berekend op basis van de actuele koersfout:
 
 ```python
-turn_sp = clamp(0.06 * abs(err), 0.02 * MAX_SPEED, 0.18 * MAX_SPEED)
+err = angle_error(0.0, self.bearing)          # kortste hoekafstand naar Noord
+lmn = self.pid_bearing.compute(-err, self.dt) # LMN: positief = CW, negatief = CCW
+turn_sp = clamp(abs(lmn), 0.02 * MAX_SPEED, 0.45 * MAX_SPEED)
 ```
 
-De stuursignalen worden omgezet naar wielsnelheden via `left = ±turn_sp, right = ∓turn_sp` (in-place draaien, richting afhankelijk van het tekenen van de koersfout).
+De PV wordt als `-err` doorgegeven zodat ER = SP − PV = 0 − (−err) = err, wat een positieve LMN-uitgang geeft bij een positieve koersfout (robot moet CW draaien). De LMN-magnitude wordt als symmetrische in-place draaisnelheid toegepast: `left = ±turn_sp, right = ∓turn_sp`.
 
 ---
 
@@ -439,16 +447,17 @@ De Webots `WbCharger`-node vereist een `battery`-veld met drie waarden: `[capaci
 
 ## 11. LED-signalering
 
-| State      | Status-LED | Batterij-LED | Betekenis                                |
-| ---------- | :--------: | :----------: | ---------------------------------------- |
-| UNDOCKING  |    AAN     |     UIT      | Robot verlaat laadstation                |
-| STOFZUIGEN |    AAN     |     UIT      | Actief stofzuigen                        |
-| DWEILEN    |    AAN     |     AAN      | Actief dweilen (beide LEDs = dweilmodus) |
-| ESCAPE     |    UIT     |     UIT      | Noodmanoeuvre                            |
-| RETURNING  |    AAN     |     AAN      | Terugkeer naar laadstation               |
-| ALIGNING   |    AAN     |     UIT      | Uitlijnen voor docken                    |
-| DOCKING    |    AAN     |     UIT      | Insturen laadstation                     |
-| CHARGING   |    UIT     |     UIT      | Stilstaand opladen                       |
+| State     | Status-LED | Batterij-LED | Betekenis                                |
+| --------- | :--------: | :----------: | ---------------------------------------- |
+| UNDOCKING |    AAN     |     UIT      | Robot verlaat laadstation                |
+| VACUUMING |    AAN     |     UIT      | Actief stofzuigen                        |
+| MOPPING   |    AAN     |     AAN      | Actief dweilen (beide LEDs = dweilmodus) |
+| ESCAPE    |    UIT     |     UIT      | Noodmanoeuvre                            |
+| RETURNING |    AAN     |     AAN      | Terugkeer naar laadstation               |
+| ALIGNING  |    AAN     |     UIT      | Uitlijnen voor docken                    |
+| DOCKING   |    AAN     |     UIT      | Insturen laadstation                     |
+| CHARGING  |    UIT     |     UIT      | Stilstaand opladen                       |
+| FINISHED  |    AAN     |     AAN      | Missie volledig afgerond                 |
 
 Aanvullend: bij een batterijpercentage ≤ 20% buiten CHARGING/DOCKING knippert de batterij-LED aan (rode waarschuwing), ongeacht de state.
 
@@ -495,11 +504,11 @@ project/
 ├── worlds/
 │   └── project.wbt                      ← Webots wereld
 ├── docs/
-│   ├── technisch_constructiedossier.md  ← Dit document
-│   ├── Roomba_205_DustCompactor_Combo_Robot.pdf  ← Gebruikshandleiding
-│   └── diagrams/
-│       ├── draw.io/                     ← Bewerkbare bronbestanden (.drawio)
-│       └── images/                      ← Geëxporteerde afbeeldingen (.jpg)
+    ├── technisch_constructiedossier.md  ← Dit document
+    ├── Roomba_205_DustCompactor_Combo_Robot.pdf  ← Gebruikshandleiding
+    └── diagrams/
+        ├── draw.io/                     ← Bewerkbare bronbestanden (.drawio)
+        └── images/                      ← Geëxporteerde afbeeldingen (.jpg)
 ```
 
 ### 13.2 Klasse-overzicht
@@ -510,10 +519,10 @@ RoombaController        — Hoofdcontroller
   _setup_devices()      — Initialisatie alle sensoren en actuatoren
   _read_sensors()       — Alle sensoruitlezingen per cyclus + tapijt­kaartering
   _execute_state_machine()  — Hoofdstate machine
-  _execute_cleaning()   — Gedeelde rijlogica voor STOFZUIGEN en DWEILEN
-  _handle_carpet_escape()   — Tapijtvermijding tijdens DWEILEN
-  _generate_waypoints()     — STOFZUIGEN waypoints (volledige breedte)
-  _generate_dweilen_waypoints()  — DWEILEN waypoints (oost­stroken in tapijt-Y-zone)
+  _execute_cleaning()   — Gedeelde rijlogica voor VACUUMING en MOPPING
+  _handle_carpet_escape()   — Tapijtvermijding tijdens MOPPING
+  _generate_waypoints()     — VACUUMING waypoints (volledige breedte)
+  _generate_mopping_waypoints()  — MOPPING waypoints (oost­stroken in tapijt-Y-zone)
   _generate_boustrophedon() — Genereer uniform zigzag-raster
   _min_carpet_y() / _max_carpet_y() / _carpet_x_east()  — Tapijt­grensberekeningen
   _check_emergencies()  — Bumper/cliff noodstop
@@ -548,11 +557,11 @@ De diagrammen zijn opgesteld in **draw.io**. De bronbestanden (`.drawio`) staan 
 
 ![Missiecyclus](./diagrams/images/missiecyclus.jpg)
 
-Hoog­niveau overzicht van de volledige missie­cyclus. De robot start met UNDOCKING, voert vervolgens STOFZUIGEN of DWEILEN uit en keert terug naar het laadstation (RETURNING → ALIGNING → DOCKING → CHARGING). Na het opladen wisselt de robot van fase als die volledig gereinigd was, anders hervat hij dezelfde fase. De cyclus herhaalt zich totdat beide fases afgerond zijn.
+Hoog­niveau overzicht van de volledige missie­cyclus. De robot start met UNDOCKING, voert vervolgens VACUUMING of MOPPING uit en keert terug naar het laadstation (RETURNING → ALIGNING → DOCKING → CHARGING). Na het opladen wisselt de robot van fase als die volledig gereinigd was, anders hervat hij dezelfde fase. De cyclus herhaalt zich totdat beide fases afgerond zijn.
 
 ### 14.2 State diagram
 
-![State diagram](./diagrams/images/diagram.jpg)
+![State diagram](./diagrams/images/state_diagram.jpg)
 
 Volledig overzicht van alle acht states en hun overgangsvoorwaarden. Elke pijl bevat de exacte trigger­conditie. Te letten op de ESCAPE-state die terugkeert naar de vorige state (`prev_state`), en de volledige docking­ketting RETURNING → ALIGNING → DOCKING → CHARGING → UNDOCKING.
 
@@ -560,7 +569,7 @@ Volledig overzicht van alle acht states en hun overgangsvoorwaarden. Elke pijl b
 
 ![Reinigingslus](./diagrams/images/reinigingslus.jpg)
 
-Detailweergave van de vijf gelaagde navigatieprioriteiten die elke tijdstap doorlopen worden in `_execute_cleaning()`. Hogere prioriteit wint altijd: fase­check (P0) → batterij/tijd (P1) → tapijtvermijding (P2, alleen DWEILEN) → LiDAR-obstakel (P3) → boustrophedon GPS-navigatie (P4). Dit garandeert dat veiligheid en terugkeer altijd voorgaan op routinenavigatie.
+Detailweergave van de vijf gelaagde navigatieprioriteiten die elke tijdstap doorlopen worden in `_execute_cleaning()`. Hogere prioriteit wint altijd: fase­check (P0) → batterij/tijd (P1) → tapijtvermijding (P2, alleen MOPPING) → LiDAR-obstakel (P3) → boustrophedon GPS-navigatie (P4). Dit garandeert dat veiligheid en terugkeer altijd voorgaan op routinenavigatie.
 
 ### 14.4 Activiteitsdiagram — dockingsequentie
 

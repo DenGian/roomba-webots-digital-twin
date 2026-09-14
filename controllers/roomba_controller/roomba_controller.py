@@ -1,51 +1,67 @@
-from controller import Robot
+"""Autonomous vacuum controller for the Webots digital-twin simulation.
+
+The controller coordinates coverage navigation, obstacle and cliff avoidance,
+carpet-aware cleaning, battery management, and autonomous docking.
+"""
+
 import math
 import random
 
-# ──────────────────────────────────────────────────────────────────────────────
-# PID CONTROLLER
-# ──────────────────────────────────────────────────────────────────────────────
-class PID_Controller:
-    """Standard PID controller. Ki=0 means P+D only."""
-    def __init__(self, iKp, iKi, iKd, iSP, iLMN_HLM, iLMN_LLM):
-        self.Kp = iKp
-        self.Ki = iKi
-        self.Kd = iKd
-        self.SP = iSP
-        self.prev_ER = 0.0
+from controller import Robot
+
+
+class PIDController:
+    """Bounded proportional-integral-derivative controller."""
+
+    def __init__(self, kp, ki, kd, setpoint, output_max, output_min):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.setpoint = setpoint
+        self.previous_error = 0.0
         self.integral = 0.0
-        self.LMN_HLM = iLMN_HLM
-        self.LMN_LLM = iLMN_LLM
+        self.output_max = output_max
+        self.output_min = output_min
 
-    def compute(self, iPV, iTimestep):
-        ER = self.SP - iPV
-        P_out = self.Kp * ER
-        self.integral += ER * iTimestep
-        I_out = self.Ki * self.integral
-        derivative = (ER - self.prev_ER) / iTimestep if iTimestep > 0 else 0.0
-        D_out = self.Kd * derivative
-        oLMN = max(self.LMN_LLM, min(self.LMN_HLM, P_out + I_out + D_out))
-        self.prev_ER = ER
-        return oLMN
+    def compute(self, process_value, timestep_s):
+        """Return the bounded control output for the current process value."""
+        error = self.setpoint - process_value
+        proportional = self.kp * error
+        self.integral += error * timestep_s
+        integral = self.ki * self.integral
+        derivative = (
+            (error - self.previous_error) / timestep_s if timestep_s > 0 else 0.0
+        )
+        output = clamp(
+            proportional + integral + self.kd * derivative,
+            self.output_min,
+            self.output_max,
+        )
+        self.previous_error = error
+        return output
 
-    def reset(self, new_SP=None):
+    def reset(self, setpoint=None):
+        """Clear accumulated state and optionally update the setpoint."""
         self.integral = 0.0
-        self.prev_ER = 0.0
-        if new_SP is not None:
-            self.SP = new_SP
+        self.previous_error = 0.0
+        if setpoint is not None:
+            self.setpoint = setpoint
 
-# ──────────────────────────────────────────────────────────────────────────────
-# HELPER FUNCTIONS
-# ──────────────────────────────────────────────────────────────────────────────
+
 def clamp(value, lo, hi):
+    """Constrain ``value`` to the inclusive range ``[lo, hi]``."""
     return max(lo, min(value, hi))
+
 
 def angle_error(target, current):
     """Shortest signed angle from current to target in [-180, 180]."""
-    err = target - current
-    while err >  180.0: err -= 360.0
-    while err < -180.0: err += 360.0
-    return err
+    error = target - current
+    while error > 180.0:
+        error -= 360.0
+    while error < -180.0:
+        error += 360.0
+    return error
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CONSTANTS
@@ -56,11 +72,11 @@ BATTERY_LOW_PCT = 0.20  # return to charger below 20%
 ROAMING_DURATION = 1200.0  # max 20 minutes per cleaning phase
 
 # LiDAR sector index ranges (256 rays, 180° FOV)
-_L0,  _L1 =   0,  64
-_FL0, _FL1 =  64, 112
-_F0,  _F1 = 112, 144
+_L0, _L1 = 0, 64
+_FL0, _FL1 = 64, 112
+_F0, _F1 = 112, 144
 _FR0, _FR1 = 144, 192
-_R0,  _R1 = 192, 256
+_R0, _R1 = 192, 256
 
 OBSTACLE_DIST = 0.35
 FAR_OBSTACLE_DIST = 0.28
@@ -72,10 +88,10 @@ CARPET_EDGE = 670
 
 # Known carpet area bounds (world coordinates)
 CARPET_X_MIN = -2.25
-CARPET_X_MAX =  0.30
-CARPET_Y_MIN =  0.05
-CARPET_Y_MAX =  1.95
-CARPET_SAFE_X =  1.20
+CARPET_X_MAX = 0.30
+CARPET_Y_MIN = 0.05
+CARPET_Y_MAX = 1.95
+CARPET_SAFE_X = 1.20
 
 # Docking geometry
 CHARGER_X = 2.00
@@ -94,11 +110,11 @@ CHARGING_MAX_TIME = 90.0
 
 # Boustrophedon (zigzag) navigation bounds and parameters
 BOUS_Y_MIN = -2.10
-BOUS_Y_MAX =  1.80
+BOUS_Y_MAX = 1.80
 BOUS_X_MIN = -2.35
-BOUS_X_MAX =  2.35
-BOUS_STRIP_STEP =  0.35
-BOUS_WP_RADIUS =  0.22
+BOUS_X_MAX = 2.35
+BOUS_STRIP_STEP = 0.35
+BOUS_WP_RADIUS = 0.22
 
 WP_FRUSTRATION_TIME = 8.0
 
@@ -114,10 +130,12 @@ SCAN_MARGIN = 0.30  # safety margin relative to detected wall points (m)
 
 CARPET_CELL_SIZE = 0.25  # grid cell size for carpet map
 
+
 # ──────────────────────────────────────────────────────────────────────────────
 # CONTROLLER
 # ──────────────────────────────────────────────────────────────────────────────
 class RoombaController:
+    """Coordinate sensing, mission planning, motion, and docking."""
 
     CLEANING_STATES = ("VACUUMING", "MOPPING")
 
@@ -151,7 +169,7 @@ class RoombaController:
         self.bous_waypoints = self._generate_waypoints()
         self.bous_wp_idx = 0
 
-        self.wp_prev_dist = float('inf')
+        self.wp_prev_dist = float("inf")
         self.wp_progress_time = 0.0
 
         # Carpet grid map, built during VACUUMING, used during MOPPING
@@ -178,11 +196,13 @@ class RoombaController:
         self.returning_via = None
 
         # PID for heading alignment during docking
-        self.pid_bearing = PID_Controller(
-            iKp=0.045, iKi=0.0, iKd=0.001,
-            iSP=0.0,
-            iLMN_HLM= 0.45 * MAX_SPEED,
-            iLMN_LLM=-0.45 * MAX_SPEED
+        self.pid_bearing = PIDController(
+            kp=0.045,
+            ki=0.0,
+            kd=0.001,
+            setpoint=0.0,
+            output_max=0.45 * MAX_SPEED,
+            output_min=-0.45 * MAX_SPEED,
         )
 
         self.aligning_start_time = 0.0
@@ -203,53 +223,61 @@ class RoombaController:
 
         self._setup_devices()
         self._set_leds("UNDOCKING")
-        print(f"[SYSTEM] Controller v5.12 | {BATTERY_MAX:.0f} J battery | "
-              f"return at {BATTERY_LOW_PCT*100:.0f}% | 20 min per phase")
-        print(f"[MISSION] Starting phase 1: {self.mission_phase} | "
-              f"{len(self._generate_waypoints())} waypoints | "
-              f"WP radius: {BOUS_WP_RADIUS}m")
+        print(
+            f"[SYSTEM] Controller v5.12 | {BATTERY_MAX:.0f} J battery | "
+            f"return at {BATTERY_LOW_PCT * 100:.0f}% | 20 min per phase"
+        )
+        print(
+            f"[MISSION] Starting phase 1: {self.mission_phase} | "
+            f"{len(self._generate_waypoints())} waypoints | "
+            f"WP radius: {BOUS_WP_RADIUS}m"
+        )
 
     # ── devices ───────────────────────────────────────────────────────────────
     def _setup_devices(self):
-        self.motor_left = self.robot.getDevice('motor_left')
-        self.motor_right = self.robot.getDevice('motor_right')
+        self.motor_left = self.robot.getDevice("motor_left")
+        self.motor_right = self.robot.getDevice("motor_right")
         for m in (self.motor_left, self.motor_right):
-            m.setPosition(float('inf'))
+            m.setPosition(float("inf"))
             m.setVelocity(0.0)
 
-        self.lidar = self.robot.getDevice('clearview_lidar')
+        self.lidar = self.robot.getDevice("clearview_lidar")
         self.lidar.enable(self.timestep)
         self.lidar.enablePointCloud()
 
         self.robot.batterySensorEnable(self.timestep)
 
-        self.bumper = self.robot.getDevice('bumper')
+        self.bumper = self.robot.getDevice("bumper")
         self.bumper.enable(self.timestep)
 
-        self.wall_sensor = self.robot.getDevice('wall_sensor')
+        self.wall_sensor = self.robot.getDevice("wall_sensor")
         self.wall_sensor.enable(self.timestep)
 
-        self.carpet_sensor = self.robot.getDevice('carpet_sensor')
+        self.carpet_sensor = self.robot.getDevice("carpet_sensor")
         self.carpet_sensor.enable(self.timestep)
 
         self.cliff_sensors = []
-        for name in ('cliff_sensor_left', 'cliff_sensor_right',
-                     'cliff_sensor_front_left', 'cliff_sensor_front_right'):
+        for name in (
+            "cliff_sensor_left",
+            "cliff_sensor_right",
+            "cliff_sensor_front_left",
+            "cliff_sensor_front_right",
+        ):
             s = self.robot.getDevice(name)
             s.enable(self.timestep)
             self.cliff_sensors.append(s)
 
-        self.gps = self.robot.getDevice('gps')
+        self.gps = self.robot.getDevice("gps")
         self.gps.enable(self.timestep)
-        self.compass = self.robot.getDevice('compass')
+        self.compass = self.robot.getDevice("compass")
         self.compass.enable(self.timestep)
 
-        self.status_led = self.robot.getDevice('status_led')
-        self.battery_led = self.robot.getDevice('battery_led')
+        self.status_led = self.robot.getDevice("status_led")
+        self.battery_led = self.robot.getDevice("battery_led")
 
     # ── actuators ────────────────────────────────────────────────────────────
-    def set_motors(self, left, right):
-        self.motor_left.setVelocity(clamp(left,  -MAX_SPEED, MAX_SPEED))
+    def _set_motor_speeds(self, left, right):
+        self.motor_left.setVelocity(clamp(left, -MAX_SPEED, MAX_SPEED))
         self.motor_right.setVelocity(clamp(right, -MAX_SPEED, MAX_SPEED))
 
     def _set_leds(self, state):
@@ -270,7 +298,7 @@ class RoombaController:
         self.battery_led.set(b)
 
     # ── bearing ───────────────────────────────────────────────────────────────
-    def get_bearing(self):
+    def _get_bearing(self):
         val = self.compass.getValues()
         if not val or math.isnan(val[0]):
             return 0.0
@@ -279,19 +307,20 @@ class RoombaController:
 
     # ── lidar ─────────────────────────────────────────────────────────────────
     def _lidar_min(self, start, end):
-        sector = [r for r in self.ranges[start:end] if 0.02 < r != float('inf')]
-        return min(sector) if sector else float('inf')
+        sector = [r for r in self.ranges[start:end] if 0.02 < r != float("inf")]
+        return min(sector) if sector else float("inf")
 
     def _read_lidar_sectors(self):
         if not self.ranges:
-            self.d_far_left = self.d_front_left = self.d_front = \
-                self.d_front_right = self.d_far_right = float('inf')
+            self.d_far_left = self.d_front_left = self.d_front = self.d_front_right = (
+                self.d_far_right
+            ) = float("inf")
             return
-        self.d_far_left = self._lidar_min(_L0,  _L1)
+        self.d_far_left = self._lidar_min(_L0, _L1)
         self.d_front_left = self._lidar_min(_FL0, _FL1)
-        self.d_front = self._lidar_min(_F0,  _F1)
+        self.d_front = self._lidar_min(_F0, _F1)
         self.d_front_right = self._lidar_min(_FR0, _FR1)
-        self.d_far_right = self._lidar_min(_R0,  _R1)
+        self.d_far_right = self._lidar_min(_R0, _R1)
 
     # ── waypoint generation ───────────────────────────────────────────────────
     def _generate_waypoints(self):
@@ -337,8 +366,10 @@ class RoombaController:
 
         n_full = sum(1 for (_, yy) in pts[::2] if not (cy_lo <= yy <= cy_hi))
         n_east = sum(1 for (_, yy) in pts[::2] if (cy_lo <= yy <= cy_hi))
-        print(f"[MOPPING] {len(pts)} waypoints: {n_full} full-width + "
-              f"{n_east} east-only strips (carpet zone {cy_lo:.2f}..{cy_hi:.2f}m)")
+        print(
+            f"[MOPPING] {len(pts)} waypoints: {n_full} full-width + "
+            f"{n_east} east-only strips (carpet zone {cy_lo:.2f}..{cy_hi:.2f}m)"
+        )
         return pts
 
     def _generate_boustrophedon(self, x_min, x_max, y_min, y_max):
@@ -366,8 +397,10 @@ class RoombaController:
     def _compute_room_bounds(self, keep_wp_done=False):
 
         if len(self.scan_wall_pts) < 50:
-            print(f"[PASSIVE SCAN] Too few points ({len(self.scan_wall_pts)}) "
-                  f"→ keeping default room dimensions")
+            print(
+                f"[PASSIVE SCAN] Too few points ({len(self.scan_wall_pts)}) "
+                f"→ keeping default room dimensions"
+            )
             return
 
         xs = sorted(p[0] for p in self.scan_wall_pts)
@@ -389,15 +422,19 @@ class RoombaController:
         new_y_max = raw_y_max - SCAN_MARGIN
 
         if new_x_max - new_x_min < 1.0 or new_y_max - new_y_min < 1.0:
-            print(f"[PASSIVE SCAN] Unreasonable room bounds "
-                  f"X=[{new_x_min:.2f},{new_x_max:.2f}], "
-                  f"Y=[{new_y_min:.2f},{new_y_max:.2f}] → keeping defaults")
+            print(
+                f"[PASSIVE SCAN] Unreasonable room bounds "
+                f"X=[{new_x_min:.2f},{new_x_max:.2f}], "
+                f"Y=[{new_y_min:.2f},{new_y_max:.2f}] → keeping defaults"
+            )
             return
 
-        print(f"[SCANNING] Room discovered: "
-              f"X=[{new_x_min:.2f}, {new_x_max:.2f}], "
-              f"Y=[{new_y_min:.2f}, {new_y_max:.2f}] "
-              f"({n} points, margin={SCAN_MARGIN}m)")
+        print(
+            f"[SCANNING] Room discovered: "
+            f"X=[{new_x_min:.2f}, {new_x_max:.2f}], "
+            f"Y=[{new_y_min:.2f}, {new_y_max:.2f}] "
+            f"({n} points, margin={SCAN_MARGIN}m)"
+        )
 
         old_count = len(self.bous_waypoints)
         self.bous_waypoints = self._generate_boustrophedon(
@@ -406,9 +443,11 @@ class RoombaController:
         if not keep_wp_done:
             self.bous_wp_idx = 0
             self.wp_done = {"VACUUMING": set(), "MOPPING": set()}
-        print(f"[PASSIVE SCAN] Waypoints updated: "
-              f"{old_count} → {len(self.bous_waypoints)} WP "
-              f"({'wp_done kept' if keep_wp_done else 'fresh start'})")
+        print(
+            f"[PASSIVE SCAN] Waypoints updated: "
+            f"{old_count} → {len(self.bous_waypoints)} WP "
+            f"({'wp_done kept' if keep_wp_done else 'fresh start'})"
+        )
 
     # ── sensors ───────────────────────────────────────────────────────────────
     def _read_sensors(self):
@@ -419,13 +458,23 @@ class RoombaController:
         self.bumper_hit = self.bumper.getValue()
         self.cliff_hit = any(s.getValue() < 100.0 for s in self.cliff_sensors)
         self.pos = self.gps.getValues()
-        self.bearing = self.get_bearing()
+        self.bearing = self._get_bearing()
         self._read_lidar_sectors()
 
         pct = int((self.battery / BATTERY_MAX) * 100) if self.battery >= 0 else 0
-        _active = self.state in ("VACUUMING", "MOPPING", "RETURNING", "ESCAPE", "UNDOCKING")
-        if (_active and pct != self.last_logged_pct
-                and pct in (50, 20) and 0 <= pct <= 100):
+        _active = self.state in (
+            "VACUUMING",
+            "MOPPING",
+            "RETURNING",
+            "ESCAPE",
+            "UNDOCKING",
+        )
+        if (
+            _active
+            and pct != self.last_logged_pct
+            and pct in (50, 20)
+            and 0 <= pct <= 100
+        ):
             print(f"[BATTERY] {pct}%")
             self.last_logged_pct = pct
         if pct <= 20 and self.state not in ("CHARGING", "DOCKING"):
@@ -437,10 +486,7 @@ class RoombaController:
             sy = self.pos[1] + 0.16 * math.cos(bearing_rad)
             cx = int(sx / CARPET_CELL_SIZE)
             cy = int(sy / CARPET_CELL_SIZE)
-            cell = (cx, cy)
-            if cell not in self.carpet_map:
-                self.carpet_map.add(cell)
-                pass  # carpet map updated silently
+            self.carpet_map.add((cx, cy))
 
     # ── watchdog ──────────────────────────────────────────────────────────────
     def _watchdog(self, t):
@@ -475,7 +521,9 @@ class RoombaController:
 
         self.escape_log_count += 1
         if t - self.last_escape_log_t > 30.0:
-            count_str = f" ×{self.escape_log_count}" if self.escape_log_count > 1 else ""
+            count_str = (
+                f" ×{self.escape_log_count}" if self.escape_log_count > 1 else ""
+            )
             print(f"[ESCAPE] {trigger}{count_str} in {self.state}")
             self.last_escape_log_t = t
             self.escape_log_count = 0
@@ -497,17 +545,17 @@ class RoombaController:
         else:
             self.escape_reverse_end = t + 1.0
             self.escape_end_time = self.escape_reverse_end + random.uniform(0.8, 1.6)
-            if self.wall_val > 200.0:
-                self.turn_direction = -1
-            elif self.d_far_right < self.d_far_left:
+            if self.wall_val > 200.0 or self.d_far_right < self.d_far_left:
                 self.turn_direction = -1
             else:
                 self.turn_direction = 1
 
     # ── carpet escape (MOPPING only) ──────────────────────────────────────────
     def _on_carpet_gps(self):
-        return (CARPET_X_MIN <= self.pos[0] <= CARPET_X_MAX and
-                CARPET_Y_MIN <= self.pos[1] <= CARPET_Y_MAX)
+        return (
+            CARPET_X_MIN <= self.pos[0] <= CARPET_X_MAX
+            and CARPET_Y_MIN <= self.pos[1] <= CARPET_Y_MAX
+        )
 
     def _wp_in_carpet_zone(self, wx, wy, buffer=0.20):
 
@@ -544,10 +592,13 @@ class RoombaController:
         carpet_y_min = self._min_carpet_y()
 
         gps_on = self._on_carpet_gps()
-        gps_near = (-2.55 <= self.pos[0] <= 0.55 and
-                    CARPET_Y_MIN - 0.20 <= self.pos[1] <= CARPET_Y_MAX + 0.25)
-        trigger = (self.carpet_val > CARPET_FULL or
-                    (self.carpet_val > CARPET_EDGE and gps_near))
+        gps_near = (
+            -2.55 <= self.pos[0] <= 0.55
+            and CARPET_Y_MIN - 0.20 <= self.pos[1] <= CARPET_Y_MAX + 0.25
+        )
+        trigger = self.carpet_val > CARPET_FULL or (
+            self.carpet_val > CARPET_EDGE and gps_near
+        )
 
         if not self.in_carpet_escape and (trigger or gps_on):
             self.in_carpet_escape = True
@@ -572,7 +623,7 @@ class RoombaController:
             tb += 360.0
         err = angle_error(tb, self.bearing)
         turn = clamp(0.05 * err, -0.35 * MAX_SPEED, 0.35 * MAX_SPEED)
-        self.set_motors(0.45 * MAX_SPEED + turn, 0.45 * MAX_SPEED - turn)
+        self._set_motor_speeds(0.45 * MAX_SPEED + turn, 0.45 * MAX_SPEED - turn)
         return True
 
     # ── shared cleaning logic ─────────────────────────────────────────────────
@@ -581,9 +632,15 @@ class RoombaController:
         # Return early if all waypoints are done
         phase_key = "VACUUMING" if allow_carpet else "MOPPING"
         if len(self.wp_done[phase_key]) >= len(self.bous_waypoints):
-            _skip_str = f" | {self.wp_skipped_count} WPs skipped" if self.wp_skipped_count else ""
-            print(f"[MISSION] {phase_key} complete "
-                  f"({len(self.wp_done[phase_key])}/{len(self.bous_waypoints)} WP{_skip_str})")
+            _skip_str = (
+                f" | {self.wp_skipped_count} WPs skipped"
+                if self.wp_skipped_count
+                else ""
+            )
+            print(
+                f"[MISSION] {phase_key} complete "
+                f"({len(self.wp_done[phase_key])}/{len(self.bous_waypoints)} WP{_skip_str})"
+            )
             self.pid_bearing.reset()
             self.in_carpet_escape = False
             self.returning_start_time = 0.0
@@ -597,7 +654,11 @@ class RoombaController:
         time_up = (t - self.roaming_start_time) >= ROAMING_DURATION
 
         if battery_low or time_up:
-            reason = "time limit 20 min" if time_up else f"low battery ({BATTERY_LOW_PCT*100:.0f}%)"
+            reason = (
+                "time limit 20 min"
+                if time_up
+                else f"low battery ({BATTERY_LOW_PCT * 100:.0f}%)"
+            )
             print(f"[STATE CHANGE] {self.state} → RETURNING ({reason})")
             self.pid_bearing.reset()
             self.in_carpet_escape = False
@@ -607,9 +668,8 @@ class RoombaController:
             self._set_leds("RETURNING")
             return
 
-        if not allow_carpet:
-            if self._handle_carpet_escape(t):
-                return
+        if not allow_carpet and self._handle_carpet_escape(t):
+            return
 
         # LiDAR obstacle avoidance
         obs_front = self.d_front < OBSTACLE_DIST
@@ -619,46 +679,50 @@ class RoombaController:
         obs_far_right = self.d_far_right < FAR_OBSTACLE_DIST
         slow_front = self.d_front < SLOW_DIST
 
-        any_obstacle = (obs_front or obs_front_left or obs_front_right
-                        or obs_far_left or obs_far_right)
+        any_obstacle = (
+            obs_front
+            or obs_front_left
+            or obs_front_right
+            or obs_far_left
+            or obs_far_right
+        )
 
         if any_obstacle:
-            self.cleaning_speed = max(0.0,
-                                      self.cleaning_speed - 0.15 * MAX_SPEED)
+            self.cleaning_speed = max(0.0, self.cleaning_speed - 0.15 * MAX_SPEED)
 
         if obs_front:
             if self.d_far_left >= self.d_far_right:
-                self.set_motors(-0.20 * MAX_SPEED, 0.55 * MAX_SPEED)
+                self._set_motor_speeds(-0.20 * MAX_SPEED, 0.55 * MAX_SPEED)
             else:
-                self.set_motors(0.55 * MAX_SPEED, -0.20 * MAX_SPEED)
+                self._set_motor_speeds(0.55 * MAX_SPEED, -0.20 * MAX_SPEED)
 
         elif obs_front_left and obs_front_right:
             if self.d_front > 0.50:
-                self.set_motors(0.25 * MAX_SPEED, 0.25 * MAX_SPEED)
+                self._set_motor_speeds(0.25 * MAX_SPEED, 0.25 * MAX_SPEED)
             else:
                 if self.d_far_left >= self.d_far_right:
-                    self.set_motors(-0.20 * MAX_SPEED, 0.55 * MAX_SPEED)
+                    self._set_motor_speeds(-0.20 * MAX_SPEED, 0.55 * MAX_SPEED)
                 else:
-                    self.set_motors(0.55 * MAX_SPEED, -0.20 * MAX_SPEED)
+                    self._set_motor_speeds(0.55 * MAX_SPEED, -0.20 * MAX_SPEED)
 
         elif obs_front_left and not obs_front_right:
-            self.set_motors(0.58 * MAX_SPEED, 0.12 * MAX_SPEED)
+            self._set_motor_speeds(0.58 * MAX_SPEED, 0.12 * MAX_SPEED)
 
         elif obs_front_right and not obs_front_left:
-            self.set_motors(0.12 * MAX_SPEED, 0.58 * MAX_SPEED)
+            self._set_motor_speeds(0.12 * MAX_SPEED, 0.58 * MAX_SPEED)
 
         elif obs_far_left and not obs_far_right:
-            self.set_motors(0.52 * MAX_SPEED, 0.30 * MAX_SPEED)
+            self._set_motor_speeds(0.52 * MAX_SPEED, 0.30 * MAX_SPEED)
 
         elif obs_far_right and not obs_far_left:
-            self.set_motors(0.30 * MAX_SPEED, 0.52 * MAX_SPEED)
+            self._set_motor_speeds(0.30 * MAX_SPEED, 0.52 * MAX_SPEED)
 
         elif slow_front:
             base = 0.35 * MAX_SPEED
             if self.d_front_left >= self.d_front_right:
-                self.set_motors(base * 0.6, base)
+                self._set_motor_speeds(base * 0.6, base)
             else:
-                self.set_motors(base, base * 0.6)
+                self._set_motor_speeds(base, base * 0.6)
 
         else:
             # Boustrophedon GPS navigation
@@ -682,7 +746,7 @@ class RoombaController:
                     self.bous_wp_idx = (self.bous_wp_idx + 1) % len(self.bous_waypoints)
                     self.wp_skipped_count += 1
                     self.wp_progress_time = t
-                    self.wp_prev_dist = float('inf')
+                    self.wp_prev_dist = float("inf")
                     wp_x, wp_y = self.bous_waypoints[self.bous_wp_idx]
                     dx_wp = wp_x - self.pos[0]
                     dy_wp = wp_y - self.pos[1]
@@ -697,16 +761,22 @@ class RoombaController:
                 self.wp_done[phase_key].add(self.bous_wp_idx)
                 self.bous_wp_idx = (self.bous_wp_idx + 1) % len(self.bous_waypoints)
                 self.wp_progress_time = t
-                self.wp_prev_dist = float('inf')
+                self.wp_prev_dist = float("inf")
 
                 if self.bous_wp_idx % 2 == 0 and self.bous_wp_idx != 0:
                     next_wp = self.bous_waypoints[self.bous_wp_idx]
                     strip_n = self.bous_wp_idx // 2
                     total_s = len(self.bous_waypoints) // 2
                     n_done = len(self.wp_done[phase_key])
-                    skipped_str = f" | {self.wp_skipped_count} skipped" if self.wp_skipped_count else ""
-                    print(f"[NAV] Strip {strip_n}/{total_s} → Y={next_wp[1]:.2f} "
-                          f"[{n_done}/{len(self.bous_waypoints)} WP{skipped_str}]")
+                    skipped_str = (
+                        f" | {self.wp_skipped_count} skipped"
+                        if self.wp_skipped_count
+                        else ""
+                    )
+                    print(
+                        f"[NAV] Strip {strip_n}/{total_s} → Y={next_wp[1]:.2f} "
+                        f"[{n_done}/{len(self.bous_waypoints)} WP{skipped_str}]"
+                    )
                 wp_x, wp_y = self.bous_waypoints[self.bous_wp_idx]
                 dx_wp = wp_x - self.pos[0]
                 dy_wp = wp_y - self.pos[1]
@@ -735,54 +805,60 @@ class RoombaController:
             wall_corr = 0.0
             if self.wall_val > 80.0:
                 wall_err = 380.0 - self.wall_val
-                wall_corr = clamp(0.0008 * wall_err,
-                                  -0.06 * MAX_SPEED, 0.06 * MAX_SPEED)
+                wall_corr = clamp(
+                    0.0008 * wall_err, -0.06 * MAX_SPEED, 0.06 * MAX_SPEED
+                )
 
-            total_turn = clamp(turn + wall_corr,
-                               -0.35 * MAX_SPEED, 0.35 * MAX_SPEED)
+            total_turn = clamp(turn + wall_corr, -0.35 * MAX_SPEED, 0.35 * MAX_SPEED)
 
             if self.exploration_factor < 1.0:
                 self.exploration_factor = min(
                     1.0,
-                    self.exploration_factor + (1.0 - self.exploration_factor) * 0.025 * self.dt
+                    self.exploration_factor
+                    + (1.0 - self.exploration_factor) * 0.025 * self.dt,
                 )
             target_speed = 0.55 * MAX_SPEED * self.exploration_factor
             ramp_delta = SPEED_RAMP * self.dt
             self.cleaning_speed = clamp(
-                self.cleaning_speed + clamp(
-                    target_speed - self.cleaning_speed,
-                    -ramp_delta, ramp_delta
-                ),
-                0.0, MAX_SPEED
+                self.cleaning_speed
+                + clamp(target_speed - self.cleaning_speed, -ramp_delta, ramp_delta),
+                0.0,
+                MAX_SPEED,
             )
 
-            self.set_motors(self.cleaning_speed + total_turn,
-                            self.cleaning_speed - total_turn)
+            self._set_motor_speeds(
+                self.cleaning_speed + total_turn, self.cleaning_speed - total_turn
+            )
 
             # ── Passive wall mapping (VACUUMING only, max 1×/5s) ────────
             # Collect LiDAR wall points during normal driving without a dedicated
             # scan phase.
-            if allow_carpet and not self.room_bounds_computed:
-                if t - self.last_scan_collect_t >= 5.0 and self.ranges:
-                    self.last_scan_collect_t = t
-                    bearing_rad = math.radians(self.bearing)
-                    sensor_x = self.pos[0] + 0.15 * math.sin(bearing_rad)
-                    sensor_y = self.pos[1] + 0.15 * math.cos(bearing_rad)
-                    n_rays = len(self.ranges)
-                    for i, r in enumerate(self.ranges):
-                        if 0.10 < r < 5.0:
-                            offset_deg = -90.0 + (180.0 / max(n_rays - 1, 1)) * i
-                            wb_rad = bearing_rad + math.radians(offset_deg)
-                            self.scan_wall_pts.append((
+            if (
+                allow_carpet
+                and not self.room_bounds_computed
+                and t - self.last_scan_collect_t >= 5.0
+                and self.ranges
+            ):
+                self.last_scan_collect_t = t
+                bearing_rad = math.radians(self.bearing)
+                sensor_x = self.pos[0] + 0.15 * math.sin(bearing_rad)
+                sensor_y = self.pos[1] + 0.15 * math.cos(bearing_rad)
+                n_rays = len(self.ranges)
+                for i, r in enumerate(self.ranges):
+                    if 0.10 < r < 5.0:
+                        offset_deg = -90.0 + (180.0 / max(n_rays - 1, 1)) * i
+                        wb_rad = bearing_rad + math.radians(offset_deg)
+                        self.scan_wall_pts.append(
+                            (
                                 sensor_x + r * math.sin(wb_rad),
-                                sensor_y + r * math.cos(wb_rad)
-                            ))
+                                sensor_y + r * math.cos(wb_rad),
+                            )
+                        )
 
     # ── stuck detection ───────────────────────────────────────────────────────
     def _check_stuck(self, t):
 
         if self.state not in self.CLEANING_STATES:
-
             self.stuck_check_pos = None
             self.stuck_check_time = 0.0
             return
@@ -792,15 +868,17 @@ class RoombaController:
             self.stuck_check_time = t
             return
 
-        moved = math.hypot(self.pos[0] - self.stuck_check_pos[0],
-                           self.pos[1] - self.stuck_check_pos[1])
+        moved = math.hypot(
+            self.pos[0] - self.stuck_check_pos[0], self.pos[1] - self.stuck_check_pos[1]
+        )
         if moved > STUCK_DIST:
-
             self.stuck_check_pos = (self.pos[0], self.pos[1])
             self.stuck_check_time = t
         elif t - self.stuck_check_time > STUCK_TIMEOUT:
-            print(f"[STUCK] No {STUCK_DIST}m movement in {STUCK_TIMEOUT:.0f}s "
-                  f"(pos={self.pos[0]:.2f},{self.pos[1]:.2f}) → ESCAPE spin")
+            print(
+                f"[STUCK] No {STUCK_DIST}m movement in {STUCK_TIMEOUT:.0f}s "
+                f"(pos={self.pos[0]:.2f},{self.pos[1]:.2f}) → ESCAPE spin"
+            )
             self.prev_state = self.state
             self.state = "ESCAPE"
             self.escape_reverse_end = t + 0.3
@@ -808,10 +886,85 @@ class RoombaController:
             self.turn_direction = 1 if random.random() > 0.5 else -1
             self.cleaning_speed = 0.0
             self.wp_progress_time = 0.0
-            self.wp_prev_dist = float('inf')
+            self.wp_prev_dist = float("inf")
             self.stuck_check_pos = None
             self.stuck_check_time = 0.0
             self._set_leds("ESCAPE")
+
+    def _enter_charging(self):
+        """Stop at the dock and initialize the charging state."""
+        docked_by_bumper = self.bumper_hit > 0 and self.pos[1] > DOCK_ARM_Y
+        trigger = "bumper" if docked_by_bumper else f"GPS/stall Y={self.pos[1]:.2f}"
+        distance = abs(CHARGER_Y - self.pos[1])
+        print(
+            f"[STATE CHANGE] DOCKING → CHARGING ({trigger}, distance={distance:.2f}m)"
+        )
+        self.last_charge_time = self.robot.getTime()
+        self.charging_start_time = 0.0
+        self.docking_start_time = 0.0
+        self.dock_last_y = 0.0
+        self.state = "CHARGING"
+        self._set_leds("CHARGING")
+        self._set_motor_speeds(0.0, 0.0)
+
+    def _complete_charging(self, battery_percentage):
+        """Resume the current phase or transition to the next mission phase."""
+        waypoint_count = len(self.bous_waypoints)
+        completed_count = len(self.wp_done[self.mission_phase])
+        current_time = self.robot.getTime()
+        print(f"[BATTERY] Charged: {battery_percentage}%")
+        self.last_logged_pct = battery_percentage
+
+        if completed_count >= waypoint_count:
+            self.phases_completed += 1
+            previous_phase = self.mission_phase
+
+            if self.phases_completed >= len(self.CLEANING_STATES):
+                print("[STATE CHANGE] CHARGING → FINISHED")
+                print(
+                    "[MISSION] Complete! VACUUMING + MOPPING done "
+                    f"| t={current_time:.0f}s | battery: {battery_percentage}%"
+                )
+                self.last_charge_time = current_time
+                self.charging_start_time = 0.0
+                self.state = "FINISHED"
+                self._set_leds("FINISHED")
+                self._set_motor_speeds(0.0, 0.0)
+                return
+
+            self.mission_phase = (
+                "MOPPING" if previous_phase == "VACUUMING" else "VACUUMING"
+            )
+            self.wp_done[self.mission_phase].clear()
+            self.fresh_phase = True
+            self.bous_wp_idx = 0
+            self.bous_waypoints = (
+                self._generate_mopping_waypoints()
+                if self.mission_phase == "MOPPING"
+                else self._generate_waypoints()
+            )
+            print(
+                "[STATE CHANGE] CHARGING → UNDOCKING "
+                f"| {previous_phase} done → next: {self.mission_phase} "
+                f"| battery: {battery_percentage}% "
+                f"| [{self.phases_completed}/{len(self.CLEANING_STATES)} phases]"
+            )
+        else:
+            remaining = waypoint_count - completed_count
+            self.fresh_phase = False
+            print(
+                "[STATE CHANGE] CHARGING → UNDOCKING "
+                f"| {self.mission_phase}: {completed_count}/{waypoint_count} WP done, "
+                f"{remaining} remaining | battery: {battery_percentage}%"
+            )
+
+        self.last_charge_time = current_time
+        self.charging_start_time = 0.0
+        self.state = "UNDOCKING"
+        self.undock_phase = "REVERSE"
+        self.undock_timer = 0.0
+        self.in_carpet_escape = False
+        self._set_leds("UNDOCKING")
 
     # ── state machine ─────────────────────────────────────────────────────────
     def _execute_state_machine(self, t):
@@ -822,7 +975,7 @@ class RoombaController:
                 self.undock_timer = t
 
             if self.undock_phase == "REVERSE":
-                self.set_motors(-0.45 * MAX_SPEED, -0.45 * MAX_SPEED)
+                self._set_motor_speeds(-0.45 * MAX_SPEED, -0.45 * MAX_SPEED)
                 if self.pos[1] < 2.1 or (t - self.undock_timer > 4.0):
                     self.undock_phase = "TURN"
                     self.undock_timer = t
@@ -830,14 +983,13 @@ class RoombaController:
             elif self.undock_phase == "TURN":
                 err = angle_error(180.0, self.bearing)
                 if abs(err) < 2.5 or (t - self.undock_timer > 5.0):
-
                     self.roaming_start_time = t
                     self.returning_start_time = 0.0
                     self.returning_via = None
                     self.in_carpet_escape = False
                     self.cleaning_speed = 0.0
                     self.wp_progress_time = 0.0
-                    self.wp_prev_dist = float('inf')
+                    self.wp_prev_dist = float("inf")
 
                     # Resume from first unvisited waypoint
                     phase_done = self.wp_done[self.mission_phase]
@@ -861,37 +1013,36 @@ class RoombaController:
                     self.wp_skipped_count = 0
                     self.state = self.mission_phase
                     self._set_leds(self.mission_phase)
-                    print(f"[STATE CHANGE] UNDOCKING → {self.mission_phase} "
-                          f"(t={t:.0f}s | WP#{self.bous_wp_idx}/{len(self.bous_waypoints)})")
+                    print(
+                        f"[STATE CHANGE] UNDOCKING → {self.mission_phase} "
+                        f"(t={t:.0f}s | WP#{self.bous_wp_idx}/{len(self.bous_waypoints)})"
+                    )
                 else:
-                    turn_sp = clamp(0.04 * abs(err),
-                                    0.08 * MAX_SPEED, 0.40 * MAX_SPEED)
+                    turn_sp = clamp(0.04 * abs(err), 0.08 * MAX_SPEED, 0.40 * MAX_SPEED)
                     if err > 0:
-                        self.set_motors(turn_sp, -turn_sp)
+                        self._set_motor_speeds(turn_sp, -turn_sp)
                     else:
-                        self.set_motors(-turn_sp, turn_sp)
+                        self._set_motor_speeds(-turn_sp, turn_sp)
 
         # ── VACUUMING ────────────────────────────────────────────────────────
         elif self.state == "VACUUMING":
-
             self._execute_cleaning(t, allow_carpet=True)
 
         # ── MOPPING ───────────────────────────────────────────────────────────
         elif self.state == "MOPPING":
-
             self._execute_cleaning(t, allow_carpet=False)
 
         # ── ESCAPE ────────────────────────────────────────────────────────────
         elif self.state == "ESCAPE":
             if t < self.escape_reverse_end:
-                self.set_motors(-0.50 * MAX_SPEED, -0.50 * MAX_SPEED)
+                self._set_motor_speeds(-0.50 * MAX_SPEED, -0.50 * MAX_SPEED)
             elif t < self.escape_end_time:
                 td = self.turn_direction
-                self.set_motors(td * 0.45 * MAX_SPEED, -td * 0.45 * MAX_SPEED)
+                self._set_motor_speeds(td * 0.45 * MAX_SPEED, -td * 0.45 * MAX_SPEED)
             else:
                 self.cleaning_speed = 0.0
                 self.wp_progress_time = 0.0
-                self.wp_prev_dist = float('inf')
+                self.wp_prev_dist = float("inf")
                 self.state = self.prev_state
                 self._set_leds(self.prev_state)
 
@@ -929,13 +1080,15 @@ class RoombaController:
                 dx_abs = abs(PREDOCK_X - self.pos[0])
                 dy_abs = abs(PREDOCK_Y - self.pos[1])
                 if dx_abs < tol_x and dy_abs < tol_y:
-                    print(f"[STATE CHANGE] RETURNING → ALIGNING "
-                          f"(X={self.pos[0]:.3f}, Y={self.pos[1]:.3f}, "
-                          f"ΔX={dx_abs:.3f}m, t_ret={ret_elapsed:.0f}s)")
+                    print(
+                        f"[STATE CHANGE] RETURNING → ALIGNING "
+                        f"(X={self.pos[0]:.3f}, Y={self.pos[1]:.3f}, "
+                        f"ΔX={dx_abs:.3f}m, t_ret={ret_elapsed:.0f}s)"
+                    )
                     self.aligning_start_time = t
                     self.returning_start_time = 0.0
                     self.returning_via = None
-                    self.pid_bearing.reset(new_SP=0.0)
+                    self.pid_bearing.reset(setpoint=0.0)
                     self.state = "ALIGNING"
                     self._set_leds("ALIGNING")
                     return
@@ -946,30 +1099,32 @@ class RoombaController:
             err = angle_error(target_deg, self.bearing)
             turn = clamp(0.045 * err, -0.40 * MAX_SPEED, 0.40 * MAX_SPEED)
 
-            obs_front = self.d_front       < OBSTACLE_DIST
-            obs_front_left = self.d_front_left  < OBSTACLE_DIST
+            obs_front = self.d_front < OBSTACLE_DIST
+            obs_front_left = self.d_front_left < OBSTACLE_DIST
             obs_front_right = self.d_front_right < OBSTACLE_DIST
-            obs_far_left = self.d_far_left    < OBSTACLE_DIST
-            obs_far_right = self.d_far_right   < OBSTACLE_DIST
+            obs_far_left = self.d_far_left < OBSTACLE_DIST
+            obs_far_right = self.d_far_right < OBSTACLE_DIST
             base = 0.40 * MAX_SPEED
 
             if obs_front or (obs_front_left and obs_front_right):
                 if self.d_far_left >= self.d_far_right:
-                    self.set_motors(-0.20 * MAX_SPEED, 0.42 * MAX_SPEED)
+                    self._set_motor_speeds(-0.20 * MAX_SPEED, 0.42 * MAX_SPEED)
                 else:
-                    self.set_motors(0.42 * MAX_SPEED, -0.20 * MAX_SPEED)
+                    self._set_motor_speeds(0.42 * MAX_SPEED, -0.20 * MAX_SPEED)
             elif obs_front_left:
-                self.set_motors(0.45 * MAX_SPEED, 0.10 * MAX_SPEED)
+                self._set_motor_speeds(0.45 * MAX_SPEED, 0.10 * MAX_SPEED)
             elif obs_front_right:
-                self.set_motors(0.10 * MAX_SPEED, 0.45 * MAX_SPEED)
+                self._set_motor_speeds(0.10 * MAX_SPEED, 0.45 * MAX_SPEED)
             elif obs_far_left and not obs_far_right:
-                self.set_motors(base + turn + 0.08 * MAX_SPEED,
-                                base - turn - 0.08 * MAX_SPEED)
+                self._set_motor_speeds(
+                    base + turn + 0.08 * MAX_SPEED, base - turn - 0.08 * MAX_SPEED
+                )
             elif obs_far_right and not obs_far_left:
-                self.set_motors(base + turn - 0.08 * MAX_SPEED,
-                                base - turn + 0.08 * MAX_SPEED)
+                self._set_motor_speeds(
+                    base + turn - 0.08 * MAX_SPEED, base - turn + 0.08 * MAX_SPEED
+                )
             else:
-                self.set_motors(base + turn, base - turn)
+                self._set_motor_speeds(base + turn, base - turn)
 
         # ── ALIGNING ──────────────────────────────────────────────────────────
         elif self.state == "ALIGNING":
@@ -993,9 +1148,9 @@ class RoombaController:
                 lmn = self.pid_bearing.compute(-err, self.dt)
                 turn_sp = clamp(abs(lmn), 0.02 * MAX_SPEED, 0.45 * MAX_SPEED)
                 if err > 0:
-                    self.set_motors(turn_sp, -turn_sp)
+                    self._set_motor_speeds(turn_sp, -turn_sp)
                 else:
-                    self.set_motors(-turn_sp, turn_sp)
+                    self._set_motor_speeds(-turn_sp, turn_sp)
 
         # ── DOCKING ───────────────────────────────────────────────────────────
         elif self.state == "DOCKING":
@@ -1010,32 +1165,21 @@ class RoombaController:
             gps_in_dock = self.pos[1] > DOCK_CONFIRM_Y
             stalled = (t - self.dock_stall_timer) > 8.0
 
-            def _enter_charging():
-                trigger = "bumper" if (self.bumper_hit > 0 and self.pos[1] > DOCK_ARM_Y) \
-                          else f"GPS/stall Y={self.pos[1]:.2f}"
-                print(f"[STATE CHANGE] DOCKING → CHARGING "
-                      f"({trigger}, distance={abs(CHARGER_Y - self.pos[1]):.2f}m)")
-                self.last_charge_time = self.robot.getTime()
-                self.charging_start_time = 0.0
-                self.docking_start_time = 0.0
-                self.dock_last_y = 0.0
-                self.state = "CHARGING"
-                self._set_leds("CHARGING")
-                self.set_motors(0.0, 0.0)
-
             if bumper_in_dock or gps_in_dock:
-                _enter_charging()
+                self._enter_charging()
             elif stalled:
                 if self.pos[1] > DOCK_STALL_RADIUS_Y:
-                    _enter_charging()
+                    self._enter_charging()
                 else:
-                    print(f"[DOCKING] Stall outside radius (Y={self.pos[1]:.2f}) → ALIGNING")
+                    print(
+                        f"[DOCKING] Stall outside radius (Y={self.pos[1]:.2f}) → ALIGNING"
+                    )
                     self.docking_start_time = 0.0
                     self.dock_last_y = 0.0
                     self.aligning_start_time = t
                     self.state = "ALIGNING"
                     self._set_leds("ALIGNING")
-                    self.set_motors(0.0, 0.0)
+                    self._set_motor_speeds(0.0, 0.0)
             elif (t - self.docking_start_time) > DOCKING_TIMEOUT:
                 print(f"[DOCKING] Timeout → ALIGNING (Y={self.pos[1]:.2f})")
                 self.docking_start_time = 0.0
@@ -1043,27 +1187,24 @@ class RoombaController:
                 self.aligning_start_time = t
                 self.state = "ALIGNING"
                 self._set_leds("ALIGNING")
-                self.set_motors(0.0, 0.0)
+                self._set_motor_speeds(0.0, 0.0)
             else:
-
                 x_err = CHARGER_X - self.pos[0]
                 bearing_err = angle_error(0.0, self.bearing)
-                x_turn = clamp(4.0 * x_err,
-                                    -0.20 * MAX_SPEED, 0.20 * MAX_SPEED)
-                b_turn = clamp(0.02 * bearing_err,
-                                    -0.08 * MAX_SPEED, 0.08 * MAX_SPEED)
-                turn = clamp(x_turn + b_turn,
-                                    -0.20 * MAX_SPEED, 0.20 * MAX_SPEED)
-                self.set_motors(0.12 * MAX_SPEED + turn, 0.12 * MAX_SPEED - turn)
+                x_turn = clamp(4.0 * x_err, -0.20 * MAX_SPEED, 0.20 * MAX_SPEED)
+                b_turn = clamp(0.02 * bearing_err, -0.08 * MAX_SPEED, 0.08 * MAX_SPEED)
+                turn = clamp(x_turn + b_turn, -0.20 * MAX_SPEED, 0.20 * MAX_SPEED)
+                self._set_motor_speeds(0.12 * MAX_SPEED + turn, 0.12 * MAX_SPEED - turn)
 
         # ── CHARGING ──────────────────────────────────────────────────────────
         elif self.state == "CHARGING":
             if self.charging_start_time == 0.0:
                 self.charging_start_time = t
-                pct = int((self.battery / BATTERY_MAX) * 100)
 
             if self.pos[1] < DOCK_STALL_RADIUS_Y:
-                print(f"[CHARGING] Outside charging zone (Y={self.pos[1]:.2f}) → DOCKING")
+                print(
+                    f"[CHARGING] Outside charging zone (Y={self.pos[1]:.2f}) → DOCKING"
+                )
                 self.docking_start_time = t
                 self.dock_last_y = 0.0
                 self.dock_stall_timer = t
@@ -1072,72 +1213,19 @@ class RoombaController:
                 self._set_leds("DOCKING")
                 return
 
-            self.set_motors(0.0, 0.0)
+            self._set_motor_speeds(0.0, 0.0)
             pct = int((self.battery / BATTERY_MAX) * 100) if self.battery >= 0 else 0
 
-            def _start_next_phase():
-                n_total = len(self.bous_waypoints)
-                phase_key = self.mission_phase
-                n_done = len(self.wp_done[phase_key])
-                t_now = self.robot.getTime()
-                dur = t_now - self.last_charge_time if self.last_charge_time else 0
-                print(f"[BATTERY] Charged: {pct}%")
-                self.last_logged_pct = pct
-
-                if n_done >= n_total:
-                    self.phases_completed += 1
-                    old_phase = self.mission_phase
-
-                    if self.phases_completed >= 2:
-                        print(f"[STATE CHANGE] CHARGING → FINISHED")
-                        print(f"[MISSION] Complete! VACUUMING + MOPPING done "
-                              f"| t={t_now:.0f}s | battery: {pct}%")
-                        self.last_charge_time = t_now
-                        self.charging_start_time = 0.0
-                        self.state = "FINISHED"
-                        self._set_leds("FINISHED")
-                        self.set_motors(0.0, 0.0)
-                        return
-
-                    self.mission_phase = ("MOPPING" if old_phase == "VACUUMING"
-                                          else "VACUUMING")
-                    self.wp_done[self.mission_phase].clear()
-                    self.fresh_phase = True
-                    self.bous_wp_idx = 0
-
-                    if self.mission_phase == "MOPPING":
-                        self.bous_waypoints = self._generate_mopping_waypoints()
-                    else:
-                        self.bous_waypoints = self._generate_waypoints()
-
-                    print(f"[STATE CHANGE] CHARGING → UNDOCKING "
-                          f"| {old_phase} done → next: {self.mission_phase} "
-                          f"| battery: {pct}% | [{self.phases_completed}/2 phases]")
-                else:
-                    remaining = n_total - n_done
-                    self.fresh_phase = False
-                    print(f"[STATE CHANGE] CHARGING → UNDOCKING "
-                          f"| {phase_key}: {n_done}/{n_total} WP done, "
-                          f"{remaining} remaining | battery: {pct}%")
-
-                self.last_charge_time = t_now
-                self.charging_start_time = 0.0
-                self.state = "UNDOCKING"
-                self.undock_phase = "REVERSE"
-                self.undock_timer = 0.0
-                self.in_carpet_escape = False
-                self._set_leds("UNDOCKING")
-
             if pct >= 95:
-                _start_next_phase()
+                self._complete_charging(pct)
             elif (t - self.charging_start_time) > CHARGING_MAX_TIME:
                 print(f"[CHARGING] Timeout {CHARGING_MAX_TIME:.0f}s (battery: {pct}%)")
-                _start_next_phase()
+                self._complete_charging(pct)
 
         # ── FINISHED ─────────────────────────────────────────────────────────
         elif self.state == "FINISHED":
             # Mission fully completed: VACUUMING + MOPPING both done.
-            self.set_motors(0.0, 0.0)
+            self._set_motor_speeds(0.0, 0.0)
 
     # ── main loop ─────────────────────────────────────────────────────────────
     def run_step(self):
@@ -1148,12 +1236,16 @@ class RoombaController:
         self._check_stuck(t)
         self._execute_state_machine(t)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# WEBOTS ENTRY POINT
-# ──────────────────────────────────────────────────────────────────────────────
-robot = Robot()
-timestep = int(robot.getBasicTimeStep())
-roomba = RoombaController(robot, timestep)
 
-while robot.step(timestep) != -1:
-    roomba.run_step()
+def main():
+    """Run the controller in the active Webots simulation."""
+    robot = Robot()
+    timestep = int(robot.getBasicTimeStep())
+    controller = RoombaController(robot, timestep)
+
+    while robot.step(timestep) != -1:
+        controller.run_step()
+
+
+if __name__ == "__main__":
+    main()

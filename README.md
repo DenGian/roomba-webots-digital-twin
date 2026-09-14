@@ -23,27 +23,17 @@ featuring LiDAR navigation, carpet mapping, docking and multi-mode cleaning.
 
 ## Simulation demo
 
-No demo media is currently tracked. The image links below are intentional upload
-targets; replace them by recording short, tightly cropped GIFs from Webots and
-saving them at the listed paths.
+### Navigation and obstacle avoidance
 
-| Scenario | GIF placeholder |
-| --- | --- |
-| Leaving the dock | ![Demo: leaving the dock](docs/demo/leaving-the-dock.gif) |
-| Systematic navigation | ![Demo: systematic navigation](docs/demo/systematic-navigation.gif) |
-| Obstacle avoidance | ![Demo: obstacle avoidance](docs/demo/obstacle-avoidance.gif) |
-| Carpet detection | ![Demo: carpet detection](docs/demo/carpet-detection.gif) |
-| Returning and docking | ![Demo: returning and docking](docs/demo/returning-and-docking.gif) |
+![Navigation and obstacle avoidance demo](docs/assets/navigation_and_obstacle_avoidance.gif)
 
-Recommended capture workflow:
+### Docking and undocking
 
-1. Record each behavior as a separate 5-12 second clip with Webots overlays kept
-   to a minimum.
-2. Crop to the simulation viewport and export at a readable width of roughly
-   900-1200 pixels.
-3. Optimize each GIF for repository size and place it under `docs/demo/` using
-   the filenames above.
-4. Remove this instruction block once all five files are available.
+![Docking and undocking demo](docs/assets/docking_and_undocking.gif)
+
+### Undocking
+
+![Undocking demo](docs/assets/undocking.gif)
 
 ## How it works
 
@@ -105,6 +95,7 @@ required.
 │   └── roomba_controller/
 │       └── roomba_controller.py
 ├── docs/
+│   ├── assets/
 │   ├── diagrams/
 │   │   ├── draw.io/
 │   │   └── images/

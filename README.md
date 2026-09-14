@@ -1,103 +1,132 @@
-# iRobot Roomba® 205 DustCompactor™ Combo — Webots Digital Twin
+# Roomba Webots Digital Twin
 
-Digitale twin van de [iRobot Roomba® 205 DustCompactor™ Combo](https://www.irobot.be/nl_BE/roomba-205-dustcompactor-combo/L121240.html), ontwikkeld in het kader van de design project **Robot Design** aan de the original development environment.
+Digital twin of an autonomous robotic vacuum built in Webots and Python,
+featuring LiDAR navigation, carpet mapping, docking and multi-mode cleaning.
 
-De simulatie reproduceert het gedrag van het werkelijke toestel: systematische baannavigatie via ClearView™ LiDAR, automatische terugkeer naar het laadstation, modus­afwisseling tussen stofzuigen en dweilen, en tapijtvermijding.
+> An independently implemented simulation inspired by the iRobot Roomba 205
+> DustCompactor Combo. This project is not affiliated with or endorsed by
+> iRobot Corporation.
 
----
+| Mission lifecycle | Controller state machine |
+| --- | --- |
+| ![Mission lifecycle](docs/diagrams/images/mission-cycle.jpg) | ![Controller state machine](docs/diagrams/images/state-diagram.jpg) |
 
-## Inhoud
+## Highlights
 
-- [iRobot Roomba® 205 DustCompactor™ Combo — Webots Digital Twin](#irobot-roomba-205-dustcompactor-combo--webots-digital-twin)
-  - [Inhoud](#inhoud)
-  - [Simulatieomgeving](#simulatieomgeving)
-  - [Functies](#functies)
-  - [Aan de slag](#aan-de-slag)
-    - [Vereisten](#vereisten)
-    - [Simulatie starten](#simulatie-starten)
-  - [Projectstructuur](#projectstructuur)
-  - [Documentatie](#documentatie)
-  - [Auteur](#auteur)
+- Boustrophedon coverage using GPS waypoints and LiDAR-assisted navigation
+- Five-sector reactive obstacle avoidance from a 256-ray, 180-degree LiDAR
+- Vacuuming and carpet-aware mopping mission phases
+- Persistent 0.25 m carpet grid built from downward-facing sensor readings
+- Battery-aware return, PID heading alignment, docking, and charging
+- Bumper, cliff, stalled-motion, waypoint, and docking recovery paths
+- Editable Draw.io architecture diagrams and detailed technical documentation
 
----
+## Simulation demo
 
-## Simulatieomgeving
+No demo media is currently tracked. The image links below are intentional upload
+targets; replace them by recording short, tightly cropped GIFs from Webots and
+saving them at the listed paths.
 
-| Component         | Versie / Waarde             |
-| ----------------- | --------------------------- |
-| Simulatieplatform | Webots R2025a               |
-| Robotmodel        | iRobot Roomba® 205 (custom) |
-| Controllertaal    | Python 3                    |
+| Scenario | GIF placeholder |
+| --- | --- |
+| Leaving the dock | ![Demo: leaving the dock](docs/demo/leaving-the-dock.gif) |
+| Systematic navigation | ![Demo: systematic navigation](docs/demo/systematic-navigation.gif) |
+| Obstacle avoidance | ![Demo: obstacle avoidance](docs/demo/obstacle-avoidance.gif) |
+| Carpet detection | ![Demo: carpet detection](docs/demo/carpet-detection.gif) |
+| Returning and docking | ![Demo: returning and docking](docs/demo/returning-and-docking.gif) |
 
-De wereld stelt een gesloten kamer voor van ±5,9 × 5,9 m met obstakels (sofa, tafel), een tapijt en een laadstation in de noordoostelijke hoek.
+Recommended capture workflow:
 
----
+1. Record each behavior as a separate 5-12 second clip with Webots overlays kept
+   to a minimum.
+2. Crop to the simulation viewport and export at a readable width of roughly
+   900-1200 pixels.
+3. Optimize each GIF for repository size and place it under `docs/demo/` using
+   the filenames above.
+4. Remove this instruction block once all five files are available.
 
-## Functies
+## How it works
 
-- **Boustrophedon-navigatie** — systematische wand-tot-wand baandekking via GPS-waypoints, identiek aan het ClearView™ LiDAR-principe van het werkelijke toestel
-- **Twee reinigingsmodi** — STOFZUIGEN (tapijt toegestaan) en DWEILEN (tapijtvermijding actief), met automatische fasewisseling
-- **Persistente tapijt­gridkaart** — gebouwd tijdens STOFZUIGEN, herbruikt in DWEILEN voor slimme waypointgeneratie
-- **Automatisch docken** — RETURNING → ALIGNING → DOCKING → CHARGING, met GPS X-correctie en meerdere fallbackcondities
-- **Reactieve obstakelontwijking** — op basis van 256-ray LiDAR (180° FOV), met sector­gebaseerde snelheids- en sturingsaanpassing
-- **Noodmanoeuvre (ESCAPE)** — getriggerd bij bumpercontact of afgrond­detectie, keert terug naar vorige state
-- **Stuck-detectie** — automatische escape-spin als de robot langer dan 10 s minder dan 5 cm vooruitkomt
-- **Persistente waypoint-afhandeling** — voltooide waypoints overleven laadcycli; de robot hervat altijd waar hij gebleven was
+The controller follows a safety-first state machine. It undocks, executes the
+active cleaning phase, returns to a pre-dock waypoint when the phase is complete
+or the battery is low, aligns with the dock, charges, and then resumes or changes
+phase.
 
----
+| Cleaning priorities | Docking sequence |
+| --- | --- |
+| ![Cleaning-loop priorities](docs/diagrams/images/cleaning-loop.jpg) | ![Docking sequence](docs/diagrams/images/docking.jpg) |
 
-## Aan de slag
+During vacuuming, the downward-facing surface sensor populates a grid of carpet
+cells. During mopping, those cells reshape the coverage path and activate a
+directed escape whenever the robot reaches carpet. LiDAR obstacle reactions,
+contact recovery, cliff detection, and a stalled-motion watchdog preempt normal
+waypoint tracking.
 
-### Vereisten
+See the [technical design](docs/technical-design.md) for device configuration,
+state transitions, navigation thresholds, carpet logic, and docking fallbacks.
 
-- [Webots R2025a](https://cyberbotics.com/) geïnstalleerd
-- Python 3.x (meegeleverd met Webots of systeeminstallatie)
+## Requirements
 
-### Simulatie starten
+- Webots R2025a
+- Python 3 supported by the Webots installation
 
-1. Kloon of download deze repository.
-2. Open Webots en laad de wereld via **File → Open World**:
+The controller relies only on Python's standard library and the Webots
+`controller` module supplied by Webots. No separate package installation is
+required.
+
+## Run the simulation
+
+1. Clone the repository and enter its directory:
+
+   ```bash
+   git clone <repository-url>
+   cd roomba-webots-digital-twin
    ```
-   worlds/project.wbt
+
+2. Start Webots with the included world:
+
+   ```bash
+   webots worlds/project.wbt
    ```
-3. Klik op **Play**. De controller start automatisch.
 
-De robot begint in UNDOCKING-state, rijdt achteruit van het laadstation weg en start daarna de eerste reinigingsfase (STOFZUIGEN).
+   On systems where the `webots` command is not on `PATH`, open Webots and
+   select **File > Open World**, then choose `worlds/project.wbt`.
 
----
+3. Press **Play**. The world assigns `roomba_controller` to the robot, so Webots
+   starts `controllers/roomba_controller/roomba_controller.py` automatically.
 
-## Projectstructuur
+4. Follow state, navigation, battery, and watchdog events in the Webots console.
 
-```
-project/
+## Project structure
+
+```text
+.
 ├── controllers/
 │   └── roomba_controller/
-│       └── roomba_controller.py         ← Hoofdcontroller
-├── worlds/
-│   └── project.wbt                      ← Webots simulatiewereld
+│       └── roomba_controller.py
 ├── docs/
-│   ├── technisch_constructiedossier.md  ← Volledig technisch dossier
-│   ├── Roomba_205_DustCompactor_Combo_Robot.pdf  ← Gebruikshandleiding
-│   └── diagrams/
-│       ├── draw.io/                     ← Bewerkbare diagrambronbestanden
-│       └── images/                      ← Geëxporteerde diagramafbeeldingen
+│   ├── diagrams/
+│   │   ├── draw.io/
+│   │   └── images/
+│   └── technical-design.md
+├── worlds/
+│   └── project.wbt
+├── LICENSE
 └── README.md
 ```
 
----
+## Design boundaries
 
-## Documentatie
+- GPS provides ground-truth position inside the simulation; this is a digital
+  twin control prototype, not a deployable localization stack.
+- Carpet mapping is held in memory for the current simulation run.
+- The controller uses fixed fallback room and rug bounds when passive mapping has
+  insufficient observations.
+- Behavior depends on the device geometry and names defined in
+  `worlds/project.wbt`.
 
-Het technisch constructiedossier bevat een volledige beschrijving van alle sensoren, actuatoren, de state machine, de navigatiestrategie, tapijtkaartering, batterijbeheer en de softwarestructuur.
+## License
 
-→ [`docs/technisch_constructiedossier.md`](docs/technisch_constructiedossier.md)
-
-De officiële gebruikshandleiding van het werkelijke toestel is beschikbaar als bijlage:
-
-→ [`docs/Roomba_205_DustCompactor_Combo_Robot.pdf`](docs/Roomba_205_DustCompactor_Combo_Robot.pdf)
-
----
-
-## Auteur
-
-**Ian Mondelaers**
+Original code and documentation in this repository are available under the
+[MIT License](LICENSE). iRobot, Roomba, ClearView, and DustCompactor are marks of
+their respective owner and are referenced for identification only.

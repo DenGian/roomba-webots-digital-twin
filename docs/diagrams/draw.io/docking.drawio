@@ -4,7 +4,7 @@
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="title" value="Dockingsequentie" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+        <mxCell id="title" value="Docking sequence" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=14;fontStyle=1;" parent="1" vertex="1">
           <mxGeometry x="100" y="10" width="580" height="26" as="geometry" />
         </mxCell>
         <mxCell id="LMbR6BoKq19lB6xoD4UE-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0;entryDx=0;entryDy=0;" parent="1" source="st" target="d_via" edge="1">
@@ -21,22 +21,22 @@
         <mxCell id="ph_ret" value="RETURNING" style="swimlane;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=11;startSize=24;" parent="1" vertex="1">
           <mxGeometry x="50" y="80" width="700" height="310" as="geometry" />
         </mxCell>
-        <mxCell id="d_via" value="Robot Y &lt; 0,30 m?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ret" vertex="1">
+        <mxCell id="d_via" value="Robot Y &lt; 0.30 m?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ret" vertex="1">
           <mxGeometry x="195" y="38" width="210" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="a_via" value="Voeg via-punt toe&#xa;(X=0,50; Y=0,50)&#xa;om tafelzone te omzeilen" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="ph_ret" vertex="1">
+        <mxCell id="a_via" value="Add bypass waypoint&#xa;(X=0.50; Y=0.50)&#xa;to avoid the dining area" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="ph_ret" vertex="1">
           <mxGeometry x="460" y="50" width="200" height="46" as="geometry" />
         </mxCell>
-        <mxCell id="a_ret" value="GPS-navigatie naar pre-dock punt&#xa;X = 2,00 m | Y = 1,80 m&#xa;(LiDAR obstakelontwijking actief)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ret" vertex="1">
+        <mxCell id="a_ret" value="GPS navigation to pre-dock point&#xa;X = 2.00 m | Y = 1.80 m&#xa;(LiDAR obstacle avoidance active)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ret" vertex="1">
           <mxGeometry x="195" y="148" width="260" height="56" as="geometry" />
         </mxCell>
-        <mxCell id="d_pdok" value="Pre-dock bereikt?&#xa;(ΔX &lt; 0,06 m; ΔY &lt; 0,25 m)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ret" vertex="1">
+        <mxCell id="d_pdok" value="Pre-dock reached?&#xa;(ΔX &lt; 0.06 m; ΔY &lt; 0.25 m)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ret" vertex="1">
           <mxGeometry x="195" y="228" width="260" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="er1b" value="Ja" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="ph_ret" source="d_via" target="a_via" edge="1">
+        <mxCell id="er1b" value="Yes" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="ph_ret" source="d_via" target="a_via" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="er2" value="Nee" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="ph_ret" source="d_via" target="a_ret" edge="1">
+        <mxCell id="er2" value="No" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="ph_ret" source="d_via" target="a_ret" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="er2b" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" parent="ph_ret" source="a_via" target="a_ret" edge="1">
@@ -50,7 +50,7 @@
         <mxCell id="er3" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" parent="ph_ret" source="a_ret" target="d_pdok" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="er4" value="Nee" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" parent="ph_ret" source="d_pdok" target="a_ret" edge="1">
+        <mxCell id="er4" value="No" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" parent="ph_ret" source="d_pdok" target="a_ret" edge="1">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="155" y="263" />
@@ -61,16 +61,16 @@
         <mxCell id="ph_ali" value="ALIGNING" style="swimlane;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=11;startSize=24;" parent="1" vertex="1">
           <mxGeometry x="50" y="408" width="700" height="190" as="geometry" />
         </mxCell>
-        <mxCell id="a_ali" value="PID-koersregeling naar 0° (Noord)&#xa;Kp = 0,045 | Kd = 0,001 | SP = 0°" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ali" vertex="1">
+        <mxCell id="a_ali" value="PID heading control toward 0° (north)&#xa;Kp = 0.045 | Kd = 0.001 | SP = 0°" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ali" vertex="1">
           <mxGeometry x="195" y="36" width="260" height="48" as="geometry" />
         </mxCell>
-        <mxCell id="d_ali" value="Koersfout &lt; 6°&#xa;OF timeout 10 s?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ali" vertex="1">
+        <mxCell id="d_ali" value="Heading error &lt; 6°&#xa;OR timeout after 10 s?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_ali" vertex="1">
           <mxGeometry x="195" y="112" width="260" height="68" as="geometry" />
         </mxCell>
         <mxCell id="ea1" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" parent="ph_ali" source="a_ali" target="d_ali" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ea2" value="Nee" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" parent="ph_ali" source="d_ali" target="a_ali" edge="1">
+        <mxCell id="ea2" value="No" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" parent="ph_ali" source="d_ali" target="a_ali" edge="1">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="155" y="146" />
@@ -81,22 +81,22 @@
         <mxCell id="ph_dok" value="DOCKING" style="swimlane;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=11;startSize=24;" parent="1" vertex="1">
           <mxGeometry x="50" y="618" width="700" height="270" as="geometry" />
         </mxCell>
-        <mxCell id="a_dok" value="Langzaam vooruit richting lader&#xa;GPS X-correctie: bijsturen op CHARGER_X&#xa;Bearing-correctie op 0°" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_dok" vertex="1">
+        <mxCell id="a_dok" value="Drive slowly toward charger&#xa;GPS X correction toward CHARGER_X&#xa;Heading correction toward 0°" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_dok" vertex="1">
           <mxGeometry x="195" y="36" width="260" height="56" as="geometry" />
         </mxCell>
-        <mxCell id="d_chk" value="Bumper in dock OF GPS Y &gt; 2,70 m&#xa;OF stall in radius (Y &gt; 2,45 m)?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_dok" vertex="1">
+        <mxCell id="d_chk" value="Bumper at dock OR GPS Y &gt; 2.70 m&#xa;OR stall inside radius (Y &gt; 2.45 m)?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="ph_dok" vertex="1">
           <mxGeometry x="195" y="122" width="260" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="d_sta" value="Stall buiten radius&#xa;OF timeout 45 s?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" parent="ph_dok" vertex="1">
+        <mxCell id="d_sta" value="Stall outside radius&#xa;OR timeout after 45 s?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" parent="ph_dok" vertex="1">
           <mxGeometry x="494" y="122" width="200" height="80" as="geometry" />
         </mxCell>
         <mxCell id="ed1" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" parent="ph_dok" source="a_dok" target="d_chk" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ed2" value="Nee" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" parent="ph_dok" source="d_chk" target="d_sta" edge="1">
+        <mxCell id="ed2" value="No" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" parent="ph_dok" source="d_chk" target="d_sta" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ed3" value="Nee (blijf rijden)" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=0.5;exitY=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="ph_dok" source="d_sta" target="a_dok" edge="1">
+        <mxCell id="ed3" value="No (continue driving)" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=0.5;exitY=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="ph_dok" source="d_sta" target="a_dok" edge="1">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="590" y="64" />
@@ -106,19 +106,19 @@
         <mxCell id="ph_chg" value="CHARGING" style="swimlane;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=11;startSize=24;" parent="1" vertex="1">
           <mxGeometry x="50" y="908" width="700" height="210" as="geometry" />
         </mxCell>
-        <mxCell id="a_chg" value="Robot staat stil, laadt op&#xa;(WbCharger, 1000 J/s)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" parent="ph_chg" vertex="1">
+        <mxCell id="a_chg" value="Robot remains stopped and charges&#xa;(Charger, 1000 J/s)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" parent="ph_chg" vertex="1">
           <mxGeometry x="195" y="36" width="260" height="46" as="geometry" />
         </mxCell>
-        <mxCell id="d_chg" value="Batterij ≥ 95%&#xa;OF timeout 90 s?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" parent="ph_chg" vertex="1">
+        <mxCell id="d_chg" value="Battery ≥ 95%&#xa;OR timeout after 90 s?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" parent="ph_chg" vertex="1">
           <mxGeometry x="195" y="112" width="260" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="a_fas" value="Start UNDOCKING&#xa;(phase switch VACUUMING↔MOPPING&#xa;only if phase fully cleaned)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" parent="ph_chg" vertex="1">
+        <mxCell id="a_fas" value="Start UNDOCKING&#xa;(switch VACUUMING↔MOPPING only&#xa;after the phase is complete)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" parent="ph_chg" vertex="1">
           <mxGeometry x="490" y="122" width="200" height="50" as="geometry" />
         </mxCell>
         <mxCell id="ec1" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" parent="ph_chg" source="a_chg" target="d_chg" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ec2" value="Nee (wacht)" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" parent="ph_chg" source="d_chg" target="a_chg" edge="1">
+        <mxCell id="ec2" value="No (wait)" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" parent="ph_chg" source="d_chg" target="a_chg" edge="1">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="155" y="147" />
@@ -126,10 +126,10 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="ec3" value="Ja" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="ph_chg" source="d_chg" target="a_fas" edge="1">
+        <mxCell id="ec3" value="Yes" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="ph_chg" source="d_chg" target="a_fas" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ex2" value="Ja → ALIGNING" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="1" source="d_pdok" target="a_ali" edge="1">
+        <mxCell id="ex2" value="Yes → ALIGNING" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="1" source="d_pdok" target="a_ali" edge="1">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="325" y="391" as="sourcePoint" />
             <mxPoint x="325" y="444" as="targetPoint" />
@@ -139,7 +139,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="ex3" value="Ja → DOCKING" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="1" source="d_ali" target="a_dok" edge="1">
+        <mxCell id="ex3" value="Yes → DOCKING" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="1" source="d_ali" target="a_dok" edge="1">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="325" y="598" as="sourcePoint" />
             <mxPoint x="325" y="654" as="targetPoint" />
@@ -149,7 +149,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="ex4" value="Ja → CHARGING" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="1" source="d_chk" target="a_chg" edge="1">
+        <mxCell id="ex4" value="Yes → CHARGING" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="1" source="d_chk" target="a_chg" edge="1">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="325" y="888" as="sourcePoint" />
             <mxPoint x="325" y="944" as="targetPoint" />
@@ -159,7 +159,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="ex5" value="Ja → herstart ALIGNING" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=1;exitY=0.5;entryX=1;entryY=0.5;" parent="1" source="d_sta" target="a_ali" edge="1">
+        <mxCell id="ex5" value="Yes → restart ALIGNING" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;exitX=1;exitY=0.5;entryX=1;entryY=0.5;" parent="1" source="d_sta" target="a_ali" edge="1">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="710" y="760" as="sourcePoint" />
             <mxPoint x="710" y="456" as="targetPoint" />

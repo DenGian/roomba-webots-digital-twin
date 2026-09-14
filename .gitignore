@@ -27,6 +27,9 @@ Desktop.ini
 .vscode/
 .idea/
 
+# Webots local project settings
+worlds/.project.wbproj
+
 # Logs
 *.log
 
